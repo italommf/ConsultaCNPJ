@@ -1,0 +1,21 @@
+[Unit]
+Description=CNPJ API Gunicorn daemon
+After=network.target postgresql.service
+
+[Service]
+User=www-data
+Group=www-data
+WorkingDirectory=/var/www/cnpj_api/backend
+Environment="PATH=/var/www/cnpj_api/backend/venv/bin"
+Environment="DJANGO_SETTINGS_MODULE=DadosPJ.settings"
+Environment="DJANGO_ENV=production"
+ExecStart=/var/www/cnpj_api/backend/venv/bin/gunicorn \
+    --config /var/www/cnpj_api/deploy/gunicorn_config.py \
+    DadosPJ.wsgi:application
+ExecReload=/bin/kill -s HUP $MAINPID
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target
+
