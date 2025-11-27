@@ -250,18 +250,18 @@ def recriar_tabelas(password):
         for t in tabelas:
             cur.execute(f"DROP TABLE IF EXISTS {t} CASCADE;")
             
-        # Create tables (Todos os campos 'problemáticos' como TEXT)
-        print("Criando tabelas...")
+        # Create tables (OTIMIZADAS desde o início para reduzir tamanho e melhorar performance)
+        print("Criando tabelas otimizadas...")
         
         cur.execute("""
             CREATE TABLE empresas (
                 cnpj_basico char(8) PRIMARY KEY,
-                razao_social text,
+                razao_social varchar(200),
                 natureza_juridica char(4),
                 qualificacao_do_responsavel char(2),
-                capital_social text,
+                capital_social numeric(20,2),
                 porte char(2),
-                ente_federativo text
+                ente_federativo varchar(100)
             );
         """)
         
@@ -271,32 +271,32 @@ def recriar_tabelas(password):
                 cnpj_ordem char(4),
                 cnpj_dv char(2),
                 matriz_filial char(1),
-                nome_fantasia text,
+                nome_fantasia varchar(200),
                 situacao_cadastral char(2),
-                data_situacao text,
+                data_situacao date,
                 motivo_situacao char(2),
-                cidade_exterior text,
+                cidade_exterior varchar(100),
                 pais char(3),
-                data_inicio text,
+                data_inicio date,
                 cnae_fiscal char(7),
                 cnae_fiscal_secundaria text,
-                tipo_logradouro text,
-                logradouro text,
-                numero text,
-                complemento text,
-                bairro text,
+                tipo_logradouro varchar(50),
+                logradouro varchar(200),
+                numero varchar(20),
+                complemento varchar(100),
+                bairro varchar(100),
                 cep char(8),
                 uf char(2),
                 municipio char(4),
-                ddd_1 text,
-                telefone_1 text,
-                ddd_2 text,
-                telefone_2 text,
-                ddd_fax text,
-                fax text,
-                email text,
-                situacao_especial text,
-                data_situacao_especial text
+                ddd_1 char(2),
+                telefone_1 varchar(15),
+                ddd_2 char(2),
+                telefone_2 varchar(15),
+                ddd_fax char(2),
+                fax varchar(15),
+                email varchar(150),
+                situacao_especial varchar(100),
+                data_situacao_especial date
             );
         """)
         
@@ -311,42 +311,60 @@ def recriar_tabelas(password):
             CREATE TABLE socios (
                 cnpj_basico char(8),
                 identificador_socio char(1),
-                nome_socio text,
-                cnpj_cpf_socio text,
+                nome_socio varchar(200),
+                cnpj_cpf_socio varchar(20),
                 qualificacao_socio char(2),
-                data_entrada_sociedade text,
+                data_entrada_sociedade date,
                 pais char(3),
-                representante_legal text,
-                nome_representante text,
+                representante_legal char(1),
+                nome_representante varchar(200),
                 qualificacao_representante char(2),
                 faixa_etaria char(1)
             );
         """)
-
+        
         cur.execute("""
             CREATE TABLE simples (
                 cnpj_basico char(8) PRIMARY KEY,
                 opcao_simples char(1),
-                data_opcao_simples text,
-                data_exclusao_simples text,
+                data_opcao_simples date,
+                data_exclusao_simples date,
                 opcao_mei char(1),
-                data_opcao_mei text,
-                data_exclusao_mei text
+                data_opcao_mei date,
+                data_exclusao_mei date
             );
         """)
         
-        # Tabelas de domínio
-        cur.execute("CREATE TABLE cnaes (codigo char(7) PRIMARY KEY, descricao text);")
-        cur.execute("CREATE TABLE motivos (codigo char(2) PRIMARY KEY, descricao text);")
-        cur.execute("CREATE TABLE municipios (codigo char(4) PRIMARY KEY, descricao text);")
-        cur.execute("CREATE TABLE naturezas (codigo char(4) PRIMARY KEY, descricao text);")
-        cur.execute("CREATE TABLE paises (codigo char(3) PRIMARY KEY, descricao text);")
-        cur.execute("CREATE TABLE qualificacoes (codigo char(2) PRIMARY KEY, descricao text);")
+        # Tabelas de domínio (otimizadas)
+        cur.execute("CREATE TABLE cnaes (codigo char(7) PRIMARY KEY, descricao varchar(300));")
+        cur.execute("CREATE TABLE motivos (codigo char(2) PRIMARY KEY, descricao varchar(200));")
+        cur.execute("CREATE TABLE municipios (codigo char(4) PRIMARY KEY, descricao varchar(100));")
+        cur.execute("CREATE TABLE naturezas (codigo char(4) PRIMARY KEY, descricao varchar(200));")
+        cur.execute("CREATE TABLE paises (codigo char(3) PRIMARY KEY, descricao varchar(100));")
+        cur.execute("CREATE TABLE qualificacoes (codigo char(2) PRIMARY KEY, descricao varchar(200));")
 
         conn.commit()
-        cur.close()
-        conn.close()
-        print("Tabelas recriadas com sucesso.")
+    # Criar índices básicos imediatamente (antes da importação para melhor performance)
+    print("Criando índices básicos...")
+    try:
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_estab_cnpj_basico_temp ON estabelecimentos (cnpj_basico);")
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_socios_cnpj_basico_temp ON socios (cnpj_basico);")
+    except Exception as e:
+        print(f"  Aviso ao criar índices básicos: {e}")
+    
+    conn.commit()
+    # Criar índices básicos imediatamente (antes da importação para melhor performance)
+    print("Criando índices básicos iniciais...")
+    try:
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_estab_cnpj_basico_temp ON estabelecimentos (cnpj_basico);")
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_socios_cnpj_basico_temp ON socios (cnpj_basico);")
+    except Exception as e:
+        print(f"  Aviso ao criar índices básicos: {e}")
+    
+    conn.commit()
+    cur.close()
+    conn.close()
+    print("Tabelas recriadas com sucesso.")
     except Exception as e:
         print(f"Erro ao recriar tabelas: {e}")
         sys.exit(1)
@@ -477,16 +495,75 @@ def importar_arquivo_individual(password, filepath, table_info, normalize_empty=
         cur = conn.cursor()
         cols_str = ", ".join(columns)
         
-        if normalize_empty:
-            temp_path = criar_csv_temporario_normalizado(filepath, table_info)
-            source_path = temp_path
-        else:
-            source_path = filepath
+        # Sempre normalizar para garantir conversão correta de datas
+        temp_path = criar_csv_temporario_normalizado(filepath, table_info)
+        source_path = temp_path
         
-        with open(source_path, 'r', encoding='utf-8', errors='replace') as f:
-            clean_f = NullByteStripper(f)
-            sql = f"COPY {table_name} ({cols_str}) FROM STDIN WITH (FORMAT csv, DELIMITER ';', NULL '', QUOTE '\"', ENCODING 'UTF8')"
-            cur.copy_expert(sql, clean_f)
+        # Mapear colunas de data para conversão durante importação
+        date_columns_map = {
+            "estabelecimentos": ["data_situacao", "data_inicio", "data_situacao_especial"],
+            "socios": ["data_entrada_sociedade"],
+            "simples": ["data_opcao_simples", "data_exclusao_simples", "data_opcao_mei", "data_exclusao_mei"]
+        }
+        
+        date_cols = date_columns_map.get(table_name, [])
+        
+        # Se a tabela tem colunas de data e elas são do tipo DATE, usar tabela temporária
+        if date_cols:
+            # Verificar se alguma coluna de data é do tipo DATE
+            cur.execute("""
+                SELECT column_name, data_type 
+                FROM information_schema.columns 
+                WHERE table_schema = 'public' 
+                AND table_name = %s 
+                AND column_name = ANY(%s)
+            """, (table_name, date_cols))
+            
+            date_cols_in_db = {row[0]: row[1] for row in cur.fetchall()}
+            has_date_type = any(dt == 'date' for dt in date_cols_in_db.values())
+            
+            if has_date_type:
+                # Usar tabela temporária para conversão DD/MM/YYYY -> DATE
+                temp_table = f"{table_name}_temp_import"
+                temp_cols_def = ", ".join([f"{col} text" for col in columns])
+                cur.execute(f"CREATE TEMP TABLE {temp_table} ({temp_cols_def});")
+                
+                # Importar para tabela temporária
+                with open(source_path, 'r', encoding='utf-8', errors='replace') as f:
+                    clean_f = NullByteStripper(f)
+                    sql = f"COPY {temp_table} ({cols_str}) FROM STDIN WITH (FORMAT csv, DELIMITER ';', NULL '', QUOTE '\"', ENCODING 'UTF8')"
+                    cur.copy_expert(sql, clean_f)
+                
+                # Converter e inserir na tabela final
+                insert_cols = []
+                for col in columns:
+                    if col in date_cols_in_db and date_cols_in_db[col] == 'date':
+                        insert_cols.append(f"""
+                            CASE 
+                                WHEN {temp_table}.{col} IS NULL OR TRIM({temp_table}.{col}) = '' THEN NULL
+                                WHEN {temp_table}.{col} ~ '^\\d{{2}}/\\d{{2}}/\\d{{4}}$' THEN 
+                                    TO_DATE({temp_table}.{col}, 'DD/MM/YYYY')
+                                ELSE NULL
+                            END AS {col}
+                        """)
+                    else:
+                        insert_cols.append(f"{temp_table}.{col}")
+                
+                insert_cols_str = ", ".join(insert_cols)
+                cur.execute(f"INSERT INTO {table_name} ({cols_str}) SELECT {insert_cols_str} FROM {temp_table};")
+                cur.execute(f"DROP TABLE {temp_table};")
+            else:
+                # Importar diretamente (datas ainda são TEXT)
+                with open(source_path, 'r', encoding='utf-8', errors='replace') as f:
+                    clean_f = NullByteStripper(f)
+                    sql = f"COPY {table_name} ({cols_str}) FROM STDIN WITH (FORMAT csv, DELIMITER ';', NULL '', QUOTE '\"', ENCODING 'UTF8')"
+                    cur.copy_expert(sql, clean_f)
+        else:
+            # Sem colunas de data, importar diretamente
+            with open(source_path, 'r', encoding='utf-8', errors='replace') as f:
+                clean_f = NullByteStripper(f)
+                sql = f"COPY {table_name} ({cols_str}) FROM STDIN WITH (FORMAT csv, DELIMITER ';', NULL '', QUOTE '\"', ENCODING 'UTF8')"
+                cur.copy_expert(sql, clean_f)
             
         conn.commit()
         cur.close()
@@ -506,7 +583,7 @@ def importar_arquivo_individual(password, filepath, table_info, normalize_empty=
             except OSError:
                 pass
 
-def executar_importacao(password, tables_filter=None, normalize_empty=False):
+def executar_importacao(password, tables_filter=None, normalize_empty=True):
     """
     Gerencia a importação de todos os arquivos CSV.
     Normaliza datas de YYYYMMDD para DD/MM/YYYY antes da inserção.
@@ -649,7 +726,7 @@ def verificar_importacao(password):
     conn.close()
     return divergentes
 
-def verificar_e_corrigir_importacao(password, normalize_empty=False):
+def verificar_e_corrigir_importacao(password, normalize_empty=True):
     """
     Executa a verificação e tenta corrigir divergências automaticamente.
     Usa contagem lógica de registros para evitar falsos positivos com quebras de linha.
@@ -675,8 +752,8 @@ def verificar_e_corrigir_importacao(password, normalize_empty=False):
         cur.close()
         conn.close()
         
-        # Reimportar apenas as divergentes
-        executar_importacao(password, tables_filter=divergentes, normalize_empty=normalize_empty)
+        # Reimportar apenas as divergentes (sempre normalizar para datas)
+        executar_importacao(password, tables_filter=divergentes, normalize_empty=True)
     
     print("\n[ERRO] Não foi possível corrigir todas as divergências após várias tentativas.")
     return False
@@ -697,43 +774,98 @@ def converter_e_indexar(password):
     cur = conn.cursor()
     
     # Lista de Conversões: (Tabela, Coluna, Tipo Alvo, Comando SQL)
-    # NOTA: As datas já estão no formato DD/MM/YYYY como string, então não precisamos converter para date
-    # Apenas convertemos capital_social para numeric
+    # NOTA: As tabelas já são criadas otimizadas, mas esta função serve para converter
+    # tabelas antigas ou fazer ajustes finais
     conversions = [
+        # Capital social (se ainda for text)
         ("empresas", "capital_social", "numeric", 
-         "ALTER TABLE empresas ALTER COLUMN capital_social TYPE numeric USING (REPLACE(NULLIF(TRIM(capital_social::text), ''), ',', '.')::numeric);")
+         "ALTER TABLE empresas ALTER COLUMN capital_social TYPE numeric USING (REPLACE(NULLIF(TRIM(capital_social::text), ''), ',', '.')::numeric);"),
+        
+        # Datas em estabelecimentos (se ainda forem text)
+        ("estabelecimentos", "data_situacao", "date",
+         "ALTER TABLE estabelecimentos ALTER COLUMN data_situacao TYPE date USING CASE WHEN data_situacao IS NULL OR TRIM(data_situacao) = '' THEN NULL WHEN data_situacao ~ '^\\d{2}/\\d{2}/\\d{4}$' THEN TO_DATE(data_situacao, 'DD/MM/YYYY') ELSE NULL END;"),
+        ("estabelecimentos", "data_inicio", "date",
+         "ALTER TABLE estabelecimentos ALTER COLUMN data_inicio TYPE date USING CASE WHEN data_inicio IS NULL OR TRIM(data_inicio) = '' THEN NULL WHEN data_inicio ~ '^\\d{2}/\\d{2}/\\d{4}$' THEN TO_DATE(data_inicio, 'DD/MM/YYYY') ELSE NULL END;"),
+        ("estabelecimentos", "data_situacao_especial", "date",
+         "ALTER TABLE estabelecimentos ALTER COLUMN data_situacao_especial TYPE date USING CASE WHEN data_situacao_especial IS NULL OR TRIM(data_situacao_especial) = '' THEN NULL WHEN data_situacao_especial ~ '^\\d{2}/\\d{2}/\\d{4}$' THEN TO_DATE(data_situacao_especial, 'DD/MM/YYYY') ELSE NULL END;"),
+        
+        # Datas em socios
+        ("socios", "data_entrada_sociedade", "date",
+         "ALTER TABLE socios ALTER COLUMN data_entrada_sociedade TYPE date USING CASE WHEN data_entrada_sociedade IS NULL OR TRIM(data_entrada_sociedade) = '' THEN NULL WHEN data_entrada_sociedade ~ '^\\d{2}/\\d{2}/\\d{4}$' THEN TO_DATE(data_entrada_sociedade, 'DD/MM/YYYY') ELSE NULL END;"),
+        
+        # Datas em simples
+        ("simples", "data_opcao_simples", "date",
+         "ALTER TABLE simples ALTER COLUMN data_opcao_simples TYPE date USING CASE WHEN data_opcao_simples IS NULL OR TRIM(data_opcao_simples) = '' THEN NULL WHEN data_opcao_simples ~ '^\\d{2}/\\d{2}/\\d{4}$' THEN TO_DATE(data_opcao_simples, 'DD/MM/YYYY') ELSE NULL END;"),
+        ("simples", "data_exclusao_simples", "date",
+         "ALTER TABLE simples ALTER COLUMN data_exclusao_simples TYPE date USING CASE WHEN data_exclusao_simples IS NULL OR TRIM(data_exclusao_simples) = '' THEN NULL WHEN data_exclusao_simples ~ '^\\d{2}/\\d{2}/\\d{4}$' THEN TO_DATE(data_exclusao_simples, 'DD/MM/YYYY') ELSE NULL END;"),
+        ("simples", "data_opcao_mei", "date",
+         "ALTER TABLE simples ALTER COLUMN data_opcao_mei TYPE date USING CASE WHEN data_opcao_mei IS NULL OR TRIM(data_opcao_mei) = '' THEN NULL WHEN data_opcao_mei ~ '^\\d{2}/\\d{2}/\\d{4}$' THEN TO_DATE(data_opcao_mei, 'DD/MM/YYYY') ELSE NULL END;"),
+        ("simples", "data_exclusao_mei", "date",
+         "ALTER TABLE simples ALTER COLUMN data_exclusao_mei TYPE date USING CASE WHEN data_exclusao_mei IS NULL OR TRIM(data_exclusao_mei) = '' THEN NULL WHEN data_exclusao_mei ~ '^\\d{2}/\\d{2}/\\d{4}$' THEN TO_DATE(data_exclusao_mei, 'DD/MM/YYYY') ELSE NULL END;"),
     ]
     
     print("  --- Verificando e Convertendo Tipos ---")
     for table, col, target_type, cmd in conversions:
-        current_type = get_column_type(cur, table, col)
-        if current_type != target_type:
-            print(f"    -> Convertendo {table}.{col} (de {current_type} para {target_type})...", end=" ", flush=True)
-            try:
-                start = time.time()
-                cur.execute(cmd)
-                elapsed = time.time() - start
-                print(f"Concluído em {elapsed:.2f}s")
-            except Exception as e:
-                print(f"ERRO: {e}")
-        else:
-            print(f"    -> {table}.{col} já é do tipo {target_type}.")
+        try:
+            current_type = get_column_type(cur, table, col)
+            if current_type and current_type != target_type:
+                print(f"    -> Convertendo {table}.{col} (de {current_type} para {target_type})...", end=" ", flush=True)
+                try:
+                    start = time.time()
+                    cur.execute(cmd)
+                    elapsed = time.time() - start
+                    print(f"Concluído em {elapsed:.2f}s")
+                except Exception as e:
+                    print(f"ERRO: {e}")
+            else:
+                if current_type:
+                    print(f"    -> {table}.{col} já é do tipo {target_type}.")
+        except Exception as e:
+            # Coluna pode não existir ou tabela pode não existir ainda
+            pass
 
-    # Índices
-    print("\n  --- Criando Índices (se não existirem) ---")
+    # Índices (OTIMIZADOS para performance máxima)
+    print("\n  --- Criando Índices Otimizados (se não existirem) ---")
     index_commands = [
+        # Extensões
         ("Extensão pg_trgm", "CREATE EXTENSION IF NOT EXISTS pg_trgm;"),
-        ("Índice CNPJ estabelecimentos", "CREATE INDEX IF NOT EXISTS idx_estab_cnpj ON estabelecimentos (cnpj);"),
+        
+        # Índices principais estabelecimentos (mais usados)
+        ("Índice UNIQUE CNPJ estabelecimentos", "CREATE UNIQUE INDEX IF NOT EXISTS idx_estab_cnpj_unique ON estabelecimentos (cnpj);"),
         ("Índice CNPJ básico estabelecimentos", "CREATE INDEX IF NOT EXISTS idx_estab_cnpj_basico ON estabelecimentos (cnpj_basico);"),
-        ("Índice nome fantasia (trgm)", "CREATE INDEX IF NOT EXISTS idx_estab_fantasia_trgm ON estabelecimentos USING GIN (nome_fantasia gin_trgm_ops);"),
+        
+        # Índices compostos para buscas comuns (melhoram muito a performance)
+        ("Índice composto UF + Município", "CREATE INDEX IF NOT EXISTS idx_estab_uf_municipio ON estabelecimentos (uf, municipio);"),
+        ("Índice composto UF + CNAE", "CREATE INDEX IF NOT EXISTS idx_estab_uf_cnae ON estabelecimentos (uf, cnae_fiscal);"),
+        ("Índice composto Situação + UF", "CREATE INDEX IF NOT EXISTS idx_estab_situacao_uf ON estabelecimentos (situacao_cadastral, uf);"),
+        
+        # Índices simples
         ("Índice UF estabelecimentos", "CREATE INDEX IF NOT EXISTS idx_estab_uf ON estabelecimentos (uf);"),
         ("Índice município estabelecimentos", "CREATE INDEX IF NOT EXISTS idx_estab_municipio ON estabelecimentos (municipio);"),
         ("Índice CNAE fiscal estabelecimentos", "CREATE INDEX IF NOT EXISTS idx_estab_cnae_fiscal ON estabelecimentos (cnae_fiscal);"),
+        ("Índice situação cadastral", "CREATE INDEX IF NOT EXISTS idx_estab_situacao ON estabelecimentos (situacao_cadastral);"),
+        ("Índice matriz/filial", "CREATE INDEX IF NOT EXISTS idx_estab_matriz_filial ON estabelecimentos (matriz_filial);"),
+        
+        # Índices de texto (GIN para busca rápida)
+        ("Índice nome fantasia (trgm)", "CREATE INDEX IF NOT EXISTS idx_estab_fantasia_trgm ON estabelecimentos USING GIN (nome_fantasia gin_trgm_ops);"),
+        
+        # Índices empresas
         ("Índice razão social empresas (trgm)", "CREATE INDEX IF NOT EXISTS idx_empresas_razao_trgm ON empresas USING GIN (razao_social gin_trgm_ops);"),
         ("Índice natureza jurídica empresas", "CREATE INDEX IF NOT EXISTS idx_empresas_natureza ON empresas (natureza_juridica);"),
+        ("Índice porte empresas", "CREATE INDEX IF NOT EXISTS idx_empresas_porte ON empresas (porte);"),
+        ("Índice capital social empresas", "CREATE INDEX IF NOT EXISTS idx_empresas_capital ON empresas (capital_social);"),
+        
+        # Índices compostos empresas
+        ("Índice composto Natureza + Porte", "CREATE INDEX IF NOT EXISTS idx_empresas_natureza_porte ON empresas (natureza_juridica, porte);"),
+        
+        # Índices sócios
         ("Índice nome sócio (trgm)", "CREATE INDEX IF NOT EXISTS idx_socios_nome_trgm ON socios USING GIN (nome_socio gin_trgm_ops);"),
         ("Índice CNPJ/CPF sócio", "CREATE INDEX IF NOT EXISTS idx_socios_cnpj_cpf ON socios (cnpj_cpf_socio);"),
-        ("Índice CNPJ básico sócios", "CREATE INDEX IF NOT EXISTS idx_socios_cnpj_basico ON socios (cnpj_basico);")
+        ("Índice CNPJ básico sócios", "CREATE INDEX IF NOT EXISTS idx_socios_cnpj_basico ON socios (cnpj_basico);"),
+        
+        # Índices simples
+        ("Índice opção simples", "CREATE INDEX IF NOT EXISTS idx_simples_opcao ON simples (opcao_simples);"),
+        ("Índice opção MEI", "CREATE INDEX IF NOT EXISTS idx_simples_mei ON simples (opcao_mei);"),
     ]
     
     for desc, cmd in index_commands:
@@ -745,6 +877,55 @@ def converter_e_indexar(password):
             print(f"Concluído em {elapsed:.2f}s")
         except Exception as e:
             print(f"ERRO: {e}")
+    
+    # Otimizações finais
+    print("\n  --- Otimizações Finais ---")
+    
+    # ANALYZE para atualizar estatísticas
+    print("    -> Executando ANALYZE nas tabelas...", end=" ", flush=True)
+    try:
+        start = time.time()
+        tabelas = ["empresas", "estabelecimentos", "socios", "simples", "cnaes", "motivos", "municipios", "naturezas", "paises", "qualificacoes"]
+        for tabela in tabelas:
+            cur.execute(f"ANALYZE {tabela};")
+        elapsed = time.time() - start
+        print(f"Concluído em {elapsed:.2f}s")
+    except Exception as e:
+        print(f"ERRO: {e}")
+    
+    # VACUUM (sem FULL para não bloquear) para limpar espaço morto
+    print("    -> Executando VACUUM nas tabelas...", end=" ", flush=True)
+    try:
+        start = time.time()
+        for tabela in tabelas:
+            cur.execute(f"VACUUM {tabela};")
+        elapsed = time.time() - start
+        print(f"Concluído em {elapsed:.2f}s")
+    except Exception as e:
+        print(f"ERRO: {e}")
+    
+    # Verificar tamanho final
+    print("\n  --- Tamanho do Banco ---")
+    try:
+        cur.execute("SELECT pg_size_pretty(pg_database_size(current_database()));")
+        tamanho = cur.fetchone()[0]
+        print(f"    Tamanho total do banco: {tamanho}")
+        
+        cur.execute("""
+            SELECT 
+                tablename,
+                pg_size_pretty(pg_total_relation_size('public.'||tablename)) as size
+            FROM pg_tables
+            WHERE schemaname = 'public'
+            ORDER BY pg_total_relation_size('public.'||tablename) DESC
+            LIMIT 5;
+        """)
+        print("    Top 5 tabelas por tamanho:")
+        for row in cur.fetchall():
+            print(f"      {row[0]}: {row[1]}")
+    except Exception as e:
+        print(f"    Erro ao verificar tamanho: {e}")
             
     cur.close()
     conn.close()
+    print("\nConversão e indexação concluídas.")

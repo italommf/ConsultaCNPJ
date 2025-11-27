@@ -160,8 +160,20 @@ class CompanyViewSet(viewsets.ReadOnlyModelViewSet):
                         est.nome_fantasia,
                         est.situacao_cadastral,
                         mot.descricao AS situacao_motivo_desc,
-                        est.data_situacao,
-                        est.data_inicio AS data_abertura,
+                        CASE 
+                            WHEN est.data_situacao IS NULL THEN NULL::text
+                            ELSE COALESCE(
+                                NULLIF(TO_CHAR(est.data_situacao, 'DD/MM/YYYY'), ''),
+                                est.data_situacao::text
+                            )
+                        END AS data_situacao,
+                        CASE 
+                            WHEN est.data_inicio IS NULL THEN NULL::text
+                            ELSE COALESCE(
+                                NULLIF(TO_CHAR(est.data_inicio, 'DD/MM/YYYY'), ''),
+                                est.data_inicio::text
+                            )
+                        END AS data_abertura,
                         est.cnae_fiscal,
                         cnae.descricao AS cnae_principal_desc,
                         est.cnae_fiscal_secundaria,
@@ -180,7 +192,13 @@ class CompanyViewSet(viewsets.ReadOnlyModelViewSet):
                         est.pais AS pais_estabelecimento_cod,
                         pais_est.descricao AS pais_estabelecimento_desc,
                         est.situacao_especial,
-                        est.data_situacao_especial,
+                        CASE 
+                            WHEN est.data_situacao_especial IS NULL THEN NULL::text
+                            ELSE COALESCE(
+                                NULLIF(TO_CHAR(est.data_situacao_especial, 'DD/MM/YYYY'), ''),
+                                est.data_situacao_especial::text
+                            )
+                        END AS data_situacao_especial,
                         est.cidade_exterior,
                         est.ddd_fax,
                         est.fax,
@@ -207,25 +225,37 @@ class CompanyViewSet(viewsets.ReadOnlyModelViewSet):
                         -- ========================================================================
                         simp.opcao_simples,
                         CASE 
-                            WHEN simp.data_opcao_simples IS NULL OR simp.data_opcao_simples = '' THEN NULL
-                            WHEN simp.data_opcao_simples::text LIKE '%%BC%%' THEN NULL
-                            ELSE simp.data_opcao_simples
+                            WHEN simp.data_opcao_simples IS NULL THEN NULL::text
+                            WHEN simp.data_opcao_simples::text = '' OR simp.data_opcao_simples::text LIKE '%%BC%%' THEN NULL::text
+                            ELSE COALESCE(
+                                NULLIF(TO_CHAR(simp.data_opcao_simples, 'DD/MM/YYYY'), ''),
+                                simp.data_opcao_simples::text
+                            )
                         END AS data_opcao_simples,
                         CASE 
-                            WHEN simp.data_exclusao_simples IS NULL OR simp.data_exclusao_simples = '' THEN NULL
-                            WHEN simp.data_exclusao_simples::text LIKE '%%BC%%' THEN NULL
-                            ELSE simp.data_exclusao_simples
+                            WHEN simp.data_exclusao_simples IS NULL THEN NULL::text
+                            WHEN simp.data_exclusao_simples::text = '' OR simp.data_exclusao_simples::text LIKE '%%BC%%' THEN NULL::text
+                            ELSE COALESCE(
+                                NULLIF(TO_CHAR(simp.data_exclusao_simples, 'DD/MM/YYYY'), ''),
+                                simp.data_exclusao_simples::text
+                            )
                         END AS data_exclusao_simples,
                         simp.opcao_mei,
                         CASE 
-                            WHEN simp.data_opcao_mei IS NULL OR simp.data_opcao_mei = '' THEN NULL
-                            WHEN simp.data_opcao_mei::text LIKE '%%BC%%' THEN NULL
-                            ELSE simp.data_opcao_mei
+                            WHEN simp.data_opcao_mei IS NULL THEN NULL::text
+                            WHEN simp.data_opcao_mei::text = '' OR simp.data_opcao_mei::text LIKE '%%BC%%' THEN NULL::text
+                            ELSE COALESCE(
+                                NULLIF(TO_CHAR(simp.data_opcao_mei, 'DD/MM/YYYY'), ''),
+                                simp.data_opcao_mei::text
+                            )
                         END AS data_opcao_mei,
                         CASE 
-                            WHEN simp.data_exclusao_mei IS NULL OR simp.data_exclusao_mei = '' THEN NULL
-                            WHEN simp.data_exclusao_mei::text LIKE '%%BC%%' THEN NULL
-                            ELSE simp.data_exclusao_mei
+                            WHEN simp.data_exclusao_mei IS NULL THEN NULL::text
+                            WHEN simp.data_exclusao_mei::text = '' OR simp.data_exclusao_mei::text LIKE '%%BC%%' THEN NULL::text
+                            ELSE COALESCE(
+                                NULLIF(TO_CHAR(simp.data_exclusao_mei, 'DD/MM/YYYY'), ''),
+                                simp.data_exclusao_mei::text
+                            )
                         END AS data_exclusao_mei,
                         -- ========================================================================
                         -- 4. LISTA AGREGADA DE SÓCIOS (JSON)
@@ -253,9 +283,13 @@ class CompanyViewSet(viewsets.ReadOnlyModelViewSet):
                                     END,
                                     'data_entrada_sociedade', 
                                     CASE 
-                                        WHEN soc.data_entrada_sociedade IS NULL OR soc.data_entrada_sociedade = '' THEN NULL
+                                        WHEN soc.data_entrada_sociedade IS NULL THEN NULL
                                         WHEN soc.data_entrada_sociedade::text LIKE '%%BC%%' THEN NULL
-                                        ELSE soc.data_entrada_sociedade
+                                        WHEN soc.data_entrada_sociedade::text = '' THEN NULL
+                                        ELSE COALESCE(
+                                            NULLIF(TO_CHAR(soc.data_entrada_sociedade, 'DD/MM/YYYY'), ''),
+                                            soc.data_entrada_sociedade::text
+                                        )
                                     END,
                                     'qualif_socio_cod', soc.qualificacao_socio,
                                     'qualif_socio_desc', qual_soc.descricao,
@@ -342,8 +376,20 @@ class CompanyViewSet(viewsets.ReadOnlyModelViewSet):
                         est.nome_fantasia,
                         est.situacao_cadastral,
                         mot.descricao AS situacao_motivo_desc,
-                        est.data_situacao,
-                        est.data_inicio AS data_abertura,
+                        CASE 
+                            WHEN est.data_situacao IS NULL THEN NULL::text
+                            ELSE COALESCE(
+                                NULLIF(TO_CHAR(est.data_situacao, 'DD/MM/YYYY'), ''),
+                                est.data_situacao::text
+                            )
+                        END AS data_situacao,
+                        CASE 
+                            WHEN est.data_inicio IS NULL THEN NULL::text
+                            ELSE COALESCE(
+                                NULLIF(TO_CHAR(est.data_inicio, 'DD/MM/YYYY'), ''),
+                                est.data_inicio::text
+                            )
+                        END AS data_abertura,
                         est.cnae_fiscal,
                         cnae.descricao AS cnae_principal_desc,
                         est.cnae_fiscal_secundaria,
@@ -362,7 +408,13 @@ class CompanyViewSet(viewsets.ReadOnlyModelViewSet):
                         est.pais AS pais_estabelecimento_cod,
                         pais_est.descricao AS pais_estabelecimento_desc,
                         est.situacao_especial,
-                        est.data_situacao_especial,
+                        CASE 
+                            WHEN est.data_situacao_especial IS NULL THEN NULL::text
+                            ELSE COALESCE(
+                                NULLIF(TO_CHAR(est.data_situacao_especial, 'DD/MM/YYYY'), ''),
+                                est.data_situacao_especial::text
+                            )
+                        END AS data_situacao_especial,
                         est.cidade_exterior,
                         est.ddd_fax,
                         est.fax,
@@ -383,25 +435,37 @@ class CompanyViewSet(viewsets.ReadOnlyModelViewSet):
                         qual_resp.descricao AS qualif_resp_empresa_desc,
                         simp.opcao_simples,
                         CASE 
-                            WHEN simp.data_opcao_simples IS NULL OR simp.data_opcao_simples = '' THEN NULL
-                            WHEN simp.data_opcao_simples::text LIKE '%%BC%%' THEN NULL
-                            ELSE simp.data_opcao_simples
+                            WHEN simp.data_opcao_simples IS NULL THEN NULL::text
+                            WHEN simp.data_opcao_simples::text = '' OR simp.data_opcao_simples::text LIKE '%%BC%%' THEN NULL::text
+                            ELSE COALESCE(
+                                NULLIF(TO_CHAR(simp.data_opcao_simples, 'DD/MM/YYYY'), ''),
+                                simp.data_opcao_simples::text
+                            )
                         END AS data_opcao_simples,
                         CASE 
-                            WHEN simp.data_exclusao_simples IS NULL OR simp.data_exclusao_simples = '' THEN NULL
-                            WHEN simp.data_exclusao_simples::text LIKE '%%BC%%' THEN NULL
-                            ELSE simp.data_exclusao_simples
+                            WHEN simp.data_exclusao_simples IS NULL THEN NULL::text
+                            WHEN simp.data_exclusao_simples::text = '' OR simp.data_exclusao_simples::text LIKE '%%BC%%' THEN NULL::text
+                            ELSE COALESCE(
+                                NULLIF(TO_CHAR(simp.data_exclusao_simples, 'DD/MM/YYYY'), ''),
+                                simp.data_exclusao_simples::text
+                            )
                         END AS data_exclusao_simples,
                         simp.opcao_mei,
                         CASE 
-                            WHEN simp.data_opcao_mei IS NULL OR simp.data_opcao_mei = '' THEN NULL
-                            WHEN simp.data_opcao_mei::text LIKE '%%BC%%' THEN NULL
-                            ELSE simp.data_opcao_mei
+                            WHEN simp.data_opcao_mei IS NULL THEN NULL::text
+                            WHEN simp.data_opcao_mei::text = '' OR simp.data_opcao_mei::text LIKE '%%BC%%' THEN NULL::text
+                            ELSE COALESCE(
+                                NULLIF(TO_CHAR(simp.data_opcao_mei, 'DD/MM/YYYY'), ''),
+                                simp.data_opcao_mei::text
+                            )
                         END AS data_opcao_mei,
                         CASE 
-                            WHEN simp.data_exclusao_mei IS NULL OR simp.data_exclusao_mei = '' THEN NULL
-                            WHEN simp.data_exclusao_mei::text LIKE '%%BC%%' THEN NULL
-                            ELSE simp.data_exclusao_mei
+                            WHEN simp.data_exclusao_mei IS NULL THEN NULL::text
+                            WHEN simp.data_exclusao_mei::text = '' OR simp.data_exclusao_mei::text LIKE '%%BC%%' THEN NULL::text
+                            ELSE COALESCE(
+                                NULLIF(TO_CHAR(simp.data_exclusao_mei, 'DD/MM/YYYY'), ''),
+                                simp.data_exclusao_mei::text
+                            )
                         END AS data_exclusao_mei,
                         COALESCE(
                             json_agg(
@@ -426,9 +490,13 @@ class CompanyViewSet(viewsets.ReadOnlyModelViewSet):
                                     END,
                                     'data_entrada_sociedade', 
                                     CASE 
-                                        WHEN soc.data_entrada_sociedade IS NULL OR soc.data_entrada_sociedade = '' THEN NULL
+                                        WHEN soc.data_entrada_sociedade IS NULL THEN NULL
                                         WHEN soc.data_entrada_sociedade::text LIKE '%%BC%%' THEN NULL
-                                        ELSE soc.data_entrada_sociedade
+                                        WHEN soc.data_entrada_sociedade::text = '' THEN NULL
+                                        ELSE COALESCE(
+                                            NULLIF(TO_CHAR(soc.data_entrada_sociedade, 'DD/MM/YYYY'), ''),
+                                            soc.data_entrada_sociedade::text
+                                        )
                                     END,
                                     'qualif_socio_cod', soc.qualificacao_socio,
                                     'qualif_socio_desc', qual_soc.descricao,
@@ -642,8 +710,20 @@ class CompanyViewSet(viewsets.ReadOnlyModelViewSet):
                         est.nome_fantasia,
                         est.situacao_cadastral,
                         mot.descricao AS situacao_motivo_desc,
-                        est.data_situacao,
-                        est.data_inicio AS data_abertura,
+                        CASE 
+                            WHEN est.data_situacao IS NULL THEN NULL::text
+                            ELSE COALESCE(
+                                NULLIF(TO_CHAR(est.data_situacao, 'DD/MM/YYYY'), ''),
+                                est.data_situacao::text
+                            )
+                        END AS data_situacao,
+                        CASE 
+                            WHEN est.data_inicio IS NULL THEN NULL::text
+                            ELSE COALESCE(
+                                NULLIF(TO_CHAR(est.data_inicio, 'DD/MM/YYYY'), ''),
+                                est.data_inicio::text
+                            )
+                        END AS data_abertura,
                         est.cnae_fiscal,
                         cnae.descricao AS cnae_principal_desc,
                         est.cnae_fiscal_secundaria,
@@ -662,7 +742,13 @@ class CompanyViewSet(viewsets.ReadOnlyModelViewSet):
                         est.pais AS pais_estabelecimento_cod,
                         pais_est.descricao AS pais_estabelecimento_desc,
                         est.situacao_especial,
-                        est.data_situacao_especial,
+                        CASE 
+                            WHEN est.data_situacao_especial IS NULL THEN NULL::text
+                            ELSE COALESCE(
+                                NULLIF(TO_CHAR(est.data_situacao_especial, 'DD/MM/YYYY'), ''),
+                                est.data_situacao_especial::text
+                            )
+                        END AS data_situacao_especial,
                         est.cidade_exterior,
                         est.ddd_fax,
                         est.fax,
@@ -683,25 +769,37 @@ class CompanyViewSet(viewsets.ReadOnlyModelViewSet):
                         qual_resp.descricao AS qualif_resp_empresa_desc,
                         simp.opcao_simples,
                         CASE 
-                            WHEN simp.data_opcao_simples IS NULL OR simp.data_opcao_simples = '' THEN NULL
-                            WHEN simp.data_opcao_simples::text LIKE '%%BC%%' THEN NULL
-                            ELSE simp.data_opcao_simples
+                            WHEN simp.data_opcao_simples IS NULL THEN NULL::text
+                            WHEN simp.data_opcao_simples::text = '' OR simp.data_opcao_simples::text LIKE '%%BC%%' THEN NULL::text
+                            ELSE COALESCE(
+                                NULLIF(TO_CHAR(simp.data_opcao_simples, 'DD/MM/YYYY'), ''),
+                                simp.data_opcao_simples::text
+                            )
                         END AS data_opcao_simples,
                         CASE 
-                            WHEN simp.data_exclusao_simples IS NULL OR simp.data_exclusao_simples = '' THEN NULL
-                            WHEN simp.data_exclusao_simples::text LIKE '%%BC%%' THEN NULL
-                            ELSE simp.data_exclusao_simples
+                            WHEN simp.data_exclusao_simples IS NULL THEN NULL::text
+                            WHEN simp.data_exclusao_simples::text = '' OR simp.data_exclusao_simples::text LIKE '%%BC%%' THEN NULL::text
+                            ELSE COALESCE(
+                                NULLIF(TO_CHAR(simp.data_exclusao_simples, 'DD/MM/YYYY'), ''),
+                                simp.data_exclusao_simples::text
+                            )
                         END AS data_exclusao_simples,
                         simp.opcao_mei,
                         CASE 
-                            WHEN simp.data_opcao_mei IS NULL OR simp.data_opcao_mei = '' THEN NULL
-                            WHEN simp.data_opcao_mei::text LIKE '%%BC%%' THEN NULL
-                            ELSE simp.data_opcao_mei
+                            WHEN simp.data_opcao_mei IS NULL THEN NULL::text
+                            WHEN simp.data_opcao_mei::text = '' OR simp.data_opcao_mei::text LIKE '%%BC%%' THEN NULL::text
+                            ELSE COALESCE(
+                                NULLIF(TO_CHAR(simp.data_opcao_mei, 'DD/MM/YYYY'), ''),
+                                simp.data_opcao_mei::text
+                            )
                         END AS data_opcao_mei,
                         CASE 
-                            WHEN simp.data_exclusao_mei IS NULL OR simp.data_exclusao_mei = '' THEN NULL
-                            WHEN simp.data_exclusao_mei::text LIKE '%%BC%%' THEN NULL
-                            ELSE simp.data_exclusao_mei
+                            WHEN simp.data_exclusao_mei IS NULL THEN NULL::text
+                            WHEN simp.data_exclusao_mei::text = '' OR simp.data_exclusao_mei::text LIKE '%%BC%%' THEN NULL::text
+                            ELSE COALESCE(
+                                NULLIF(TO_CHAR(simp.data_exclusao_mei, 'DD/MM/YYYY'), ''),
+                                simp.data_exclusao_mei::text
+                            )
                         END AS data_exclusao_mei,
                         COALESCE(
                             json_agg(
@@ -726,9 +824,13 @@ class CompanyViewSet(viewsets.ReadOnlyModelViewSet):
                                     END,
                                     'data_entrada_sociedade', 
                                     CASE 
-                                        WHEN soc.data_entrada_sociedade IS NULL OR soc.data_entrada_sociedade = '' THEN NULL
+                                        WHEN soc.data_entrada_sociedade IS NULL THEN NULL
                                         WHEN soc.data_entrada_sociedade::text LIKE '%%BC%%' THEN NULL
-                                        ELSE soc.data_entrada_sociedade
+                                        WHEN soc.data_entrada_sociedade::text = '' THEN NULL
+                                        ELSE COALESCE(
+                                            NULLIF(TO_CHAR(soc.data_entrada_sociedade, 'DD/MM/YYYY'), ''),
+                                            soc.data_entrada_sociedade::text
+                                        )
                                     END,
                                     'qualif_socio_cod', soc.qualificacao_socio,
                                     'qualif_socio_desc', qual_soc.descricao,
@@ -924,8 +1026,20 @@ class CompanyViewSet(viewsets.ReadOnlyModelViewSet):
                         est.nome_fantasia,
                         est.situacao_cadastral,
                         mot.descricao AS situacao_motivo_desc,
-                        est.data_situacao,
-                        est.data_inicio AS data_abertura,
+                        CASE 
+                            WHEN est.data_situacao IS NULL THEN NULL::text
+                            ELSE COALESCE(
+                                NULLIF(TO_CHAR(est.data_situacao, 'DD/MM/YYYY'), ''),
+                                est.data_situacao::text
+                            )
+                        END AS data_situacao,
+                        CASE 
+                            WHEN est.data_inicio IS NULL THEN NULL::text
+                            ELSE COALESCE(
+                                NULLIF(TO_CHAR(est.data_inicio, 'DD/MM/YYYY'), ''),
+                                est.data_inicio::text
+                            )
+                        END AS data_abertura,
                         est.cnae_fiscal,
                         cnae.descricao AS cnae_principal_desc,
                         est.cnae_fiscal_secundaria,
@@ -944,7 +1058,13 @@ class CompanyViewSet(viewsets.ReadOnlyModelViewSet):
                         est.pais AS pais_estabelecimento_cod,
                         pais_est.descricao AS pais_estabelecimento_desc,
                         est.situacao_especial,
-                        est.data_situacao_especial,
+                        CASE 
+                            WHEN est.data_situacao_especial IS NULL THEN NULL::text
+                            ELSE COALESCE(
+                                NULLIF(TO_CHAR(est.data_situacao_especial, 'DD/MM/YYYY'), ''),
+                                est.data_situacao_especial::text
+                            )
+                        END AS data_situacao_especial,
                         est.cidade_exterior,
                         est.ddd_fax,
                         est.fax,
@@ -965,25 +1085,37 @@ class CompanyViewSet(viewsets.ReadOnlyModelViewSet):
                         qual_resp.descricao AS qualif_resp_empresa_desc,
                         simp.opcao_simples,
                         CASE 
-                            WHEN simp.data_opcao_simples IS NULL OR simp.data_opcao_simples = '' THEN NULL
-                            WHEN simp.data_opcao_simples::text LIKE '%%BC%%' THEN NULL
-                            ELSE simp.data_opcao_simples
+                            WHEN simp.data_opcao_simples IS NULL THEN NULL::text
+                            WHEN simp.data_opcao_simples::text = '' OR simp.data_opcao_simples::text LIKE '%%BC%%' THEN NULL::text
+                            ELSE COALESCE(
+                                NULLIF(TO_CHAR(simp.data_opcao_simples, 'DD/MM/YYYY'), ''),
+                                simp.data_opcao_simples::text
+                            )
                         END AS data_opcao_simples,
                         CASE 
-                            WHEN simp.data_exclusao_simples IS NULL OR simp.data_exclusao_simples = '' THEN NULL
-                            WHEN simp.data_exclusao_simples::text LIKE '%%BC%%' THEN NULL
-                            ELSE simp.data_exclusao_simples
+                            WHEN simp.data_exclusao_simples IS NULL THEN NULL::text
+                            WHEN simp.data_exclusao_simples::text = '' OR simp.data_exclusao_simples::text LIKE '%%BC%%' THEN NULL::text
+                            ELSE COALESCE(
+                                NULLIF(TO_CHAR(simp.data_exclusao_simples, 'DD/MM/YYYY'), ''),
+                                simp.data_exclusao_simples::text
+                            )
                         END AS data_exclusao_simples,
                         simp.opcao_mei,
                         CASE 
-                            WHEN simp.data_opcao_mei IS NULL OR simp.data_opcao_mei = '' THEN NULL
-                            WHEN simp.data_opcao_mei::text LIKE '%%BC%%' THEN NULL
-                            ELSE simp.data_opcao_mei
+                            WHEN simp.data_opcao_mei IS NULL THEN NULL::text
+                            WHEN simp.data_opcao_mei::text = '' OR simp.data_opcao_mei::text LIKE '%%BC%%' THEN NULL::text
+                            ELSE COALESCE(
+                                NULLIF(TO_CHAR(simp.data_opcao_mei, 'DD/MM/YYYY'), ''),
+                                simp.data_opcao_mei::text
+                            )
                         END AS data_opcao_mei,
                         CASE 
-                            WHEN simp.data_exclusao_mei IS NULL OR simp.data_exclusao_mei = '' THEN NULL
-                            WHEN simp.data_exclusao_mei::text LIKE '%%BC%%' THEN NULL
-                            ELSE simp.data_exclusao_mei
+                            WHEN simp.data_exclusao_mei IS NULL THEN NULL::text
+                            WHEN simp.data_exclusao_mei::text = '' OR simp.data_exclusao_mei::text LIKE '%%BC%%' THEN NULL::text
+                            ELSE COALESCE(
+                                NULLIF(TO_CHAR(simp.data_exclusao_mei, 'DD/MM/YYYY'), ''),
+                                simp.data_exclusao_mei::text
+                            )
                         END AS data_exclusao_mei,
                         COALESCE(
                             json_agg(
@@ -1008,9 +1140,13 @@ class CompanyViewSet(viewsets.ReadOnlyModelViewSet):
                                     END,
                                     'data_entrada_sociedade', 
                                     CASE 
-                                        WHEN soc.data_entrada_sociedade IS NULL OR soc.data_entrada_sociedade = '' THEN NULL
+                                        WHEN soc.data_entrada_sociedade IS NULL THEN NULL
                                         WHEN soc.data_entrada_sociedade::text LIKE '%%BC%%' THEN NULL
-                                        ELSE soc.data_entrada_sociedade
+                                        WHEN soc.data_entrada_sociedade::text = '' THEN NULL
+                                        ELSE COALESCE(
+                                            NULLIF(TO_CHAR(soc.data_entrada_sociedade, 'DD/MM/YYYY'), ''),
+                                            soc.data_entrada_sociedade::text
+                                        )
                                     END,
                                     'qualif_socio_cod', soc.qualificacao_socio,
                                     'qualif_socio_desc', qual_soc.descricao,

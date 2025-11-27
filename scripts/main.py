@@ -30,11 +30,11 @@ def main():
     # 3. Recriar Tabelas
     page.recriar_tabelas(password)
     
-    # 4. Importar (Inicial)
-    page.executar_importacao(password, normalize_empty=normalizar_vazios)
+    # 4. Importar (Inicial) - sempre normalizar para compatibilidade com tipos otimizados
+    page.executar_importacao(password, normalize_empty=True)
     
-    # 5. Verificar e Corrigir (Loop)
-    page.verificar_e_corrigir_importacao(password, normalize_empty=normalizar_vazios)
+    # 5. Verificar e Corrigir (Loop) - sempre normalizar
+    page.verificar_e_corrigir_importacao(password, normalize_empty=True)
     
     # 6. Converter e Indexar
     page.converter_e_indexar(password)
