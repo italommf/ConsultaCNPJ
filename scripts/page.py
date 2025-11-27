@@ -18,14 +18,15 @@ from datetime import datetime
 # =================================================================================
 # CONFIGURAÇÕES GERAIS
 # =================================================================================
-BASE_DIR = Path(r"d:/Projeto CNPJ")
+# BASE_DIR pode ser sobrescrito por variável de ambiente ou usa padrão
+BASE_DIR = Path(os.environ.get('CNPJ_BASE_DIR', r"d:/Projeto CNPJ"))
 DOWNLOADS_DIR = BASE_DIR / "downloads"
 DATA_DIR = BASE_DIR / "data"
 
-DB_HOST = "localhost"
-DB_PORT = "5432"
-DB_USER = "postgres"
-DB_NAME = "cnpjdb"
+DB_HOST = os.environ.get('DB_HOST', "localhost")
+DB_PORT = os.environ.get('DB_PORT', "5432")
+DB_USER = os.environ.get('DB_USER', "postgres")
+DB_NAME = os.environ.get('DB_NAME', "cnpjdb")
 
 # Mapeamento de arquivos para tabelas e colunas
 # Nota: Usamos tipos TEXT para todas as colunas inicialmente para garantir a importação.
