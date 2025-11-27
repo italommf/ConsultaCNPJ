@@ -1,8 +1,8 @@
-# Documentação da API - Sistema de Consulta CNPJ
+# Documentação Completa da API - Sistema de Consulta CNPJ
 
 ## Base URL
 ```
-http://localhost:8000/api
+https://consultacnpj.italommf.com.br/api
 ```
 
 ## Autenticação
@@ -10,6 +10,8 @@ A API requer autenticação via Token. Inclua o token no header:
 ```
 Authorization: Token seu_token_aqui
 ```
+
+**Importante:** Deixe um espaço entre "Token" e o valor do token.
 
 ---
 
@@ -22,34 +24,20 @@ Retorna todos os dados completos de uma empresa específica pelo CNPJ.
 **Endpoint:** `GET /companies/cnpj/{cnpj}/`
 
 **Parâmetros:**
-- `cnpj` (path): CNPJ da empresa (14 dígitos, com ou sem formatação)
+- `cnpj` (path, obrigatório): CNPJ da empresa (14 dígitos, com ou sem formatação)
 
-**Exemplo de Requisição:**
+**Exemplos de Requisição:**
 ```
 GET /api/companies/cnpj/12345678000190/
 GET /api/companies/cnpj/12.345.678/0001-90/
+GET /api/companies/cnpj/12345678000190
 ```
 
-#### Python (requests)
-```python
-import requests
-
-url = "http://localhost:8000/api/companies/cnpj/12345678000190/"
-headers = {
-    "Authorization": "Token seu_token_aqui"
-}
-
-response = requests.get(url, headers=headers)
-data = response.json()
-
-print(data)
-```
-
-#### Postman
-1. Método: `GET`
-2. URL: `http://localhost:8000/api/companies/cnpj/12345678000190/`
-3. Headers:
-   - `Authorization`: `Token seu_token_aqui`
+**Exemplo no Postman:**
+- URL: `https://consultacnpj.italommf.com.br/api/companies/cnpj/12345678000190/`
+- Method: `GET`
+- Headers:
+  - `Authorization`: `Token seu_token_aqui`
 
 **Resposta de Sucesso (200):**
 ```json
@@ -179,224 +167,101 @@ print(data)
 
 ---
 
-### 2. Busca Geral de Empresas
+### 2. Busca Geral de Empresas (com Filtros)
 
-Busca empresas com múltiplos filtros opcionais. Todos os filtros são opcionais e podem ser combinados.
+Busca empresas com múltiplos filtros opcionais. Todos os filtros podem ser combinados.
 
 **Endpoint:** `GET /companies/search/`
 
 **Parâmetros de Paginação:**
 - `page` (query, opcional): Número da página (padrão: 1)
-- `page_size` (query, opcional): Tamanho da página (padrão: 1000)
+- `page_size` (query, opcional): Tamanho da página (padrão: 1000, máximo recomendado: 1000)
 
 **Filtros Disponíveis:**
 
 #### CNAE
-- `cnae_principal` (query, opcional): CNAE principal (7 dígitos)
-- `cnae_secundario` (query, opcional): CNAE secundário (7 dígitos)
+- `cnae_principal` (query, opcional): CNAE principal (7 dígitos, ex: `6201501`)
+- `cnae_secundario` (query, opcional): CNAE secundário (7 dígitos, ex: `6202300`)
 
 #### Localização
-- `uf` (query, opcional): Estado (sigla de 2 letras, ex: SP, RJ, MG)
-- `municipio` (query, opcional): Código do município
+- `uf` (query, opcional): Estado (sigla de 2 letras, ex: `SP`, `RJ`, `MG`)
+- `municipio` (query, opcional): Código do município (4 dígitos, ex: `3550308` para São Paulo)
 
 #### Capital Social
-- `capital_social_min` (query, opcional): Capital social mínimo (número decimal)
-- `capital_social_max` (query, opcional): Capital social máximo (número decimal)
+- `capital_social_min` (query, opcional): Capital social mínimo (número decimal, ex: `10000`)
+- `capital_social_max` (query, opcional): Capital social máximo (número decimal, ex: `1000000`)
 
 #### Sócios
-- `qtd_socios_min` (query, opcional): Quantidade mínima de sócios (número inteiro)
-- `qtd_socios_max` (query, opcional): Quantidade máxima de sócios (número inteiro)
+- `qtd_socios_min` (query, opcional): Quantidade mínima de sócios (número inteiro, ex: `2`)
+- `qtd_socios_max` (query, opcional): Quantidade máxima de sócios (número inteiro, ex: `10`)
 
-#### Outros Filtros
-- `situacao_cadastral` (query, opcional): Situação cadastral (ex: "2" para Ativa)
-- `matriz_filial` (query, opcional): 1=Matriz, 2=Filial
+#### Situação e Tipo
+- `situacao_cadastral` (query, opcional): Situação cadastral
+  - `"2"`: Ativa
+  - `"3"`: Suspensa
+  - `"4"`: Inapta
+  - `"8"`: Baixada
+- `matriz_filial` (query, opcional): Tipo de estabelecimento
+  - `"1"`: Matriz
+  - `"2"`: Filial
+
+#### Porte da Empresa
 - `porte` (query, opcional): Porte da empresa
-  - `00`: Não informado
-  - `01`: Micro empresa
-  - `03`: Empresa de pequeno porte
-  - `05`: Demais
-- `natureza_juridica` (query, opcional): Código da natureza jurídica
-- `simples` (query, opcional): Opção pelo Simples Nacional (`S` ou `N`)
-- `mei` (query, opcional): Opção pelo MEI (`S` ou `N`)
+  - `"00"`: Não informado
+  - `"01"`: Micro empresa
+  - `"03"`: Empresa de pequeno porte
+  - `"05"`: Demais
 
-#### Exemplo 1: Buscar por CNAE Principal
+#### Natureza Jurídica
+- `natureza_juridica` (query, opcional): Código da natureza jurídica (4 dígitos, ex: `2062` para Sociedade Empresária Limitada)
+
+#### Simples Nacional e MEI
+- `simples` (query, opcional): Opção pelo Simples Nacional
+  - `"S"`: Sim
+  - `"N"`: Não
+- `mei` (query, opcional): Opção pelo MEI
+  - `"S"`: Sim
+  - `"N"`: Não
+
+**Exemplo 1: Buscar por CNAE Principal**
 ```
 GET /api/companies/search/?cnae_principal=6201501
 ```
 
-**Python:**
-```python
-import requests
-
-url = "http://localhost:8000/api/companies/search/"
-headers = {
-    "Authorization": "Token seu_token_aqui"
-}
-params = {
-    "cnae_principal": "6201501"
-}
-
-response = requests.get(url, headers=headers, params=params)
-data = response.json()
-
-print(f"Total encontrado: {data['total_count']}")
-print(f"Página {data['page']} de {data['total_pages']}")
-for empresa in data['results']:
-    print(f"- {empresa['empresa']['identificacao']['razao_social']}")
-```
-
-**Postman:**
-1. Método: `GET`
-2. URL: `http://localhost:8000/api/companies/search/`
-3. Params (Query Params):
-   - `cnae_principal`: `6201501`
-4. Headers:
-   - `Authorization`: `Token seu_token_aqui`
-
-#### Exemplo 2: Buscar por Estado e Capital Social
+**Exemplo 2: Buscar por Estado e Capital Social**
 ```
 GET /api/companies/search/?uf=SP&capital_social_min=10000&capital_social_max=100000
 ```
 
-**Python:**
-```python
-import requests
-
-url = "http://localhost:8000/api/companies/search/"
-headers = {
-    "Authorization": "Token seu_token_aqui"
-}
-params = {
-    "uf": "SP",
-    "capital_social_min": 10000,
-    "capital_social_max": 100000,
-    "page": 1,
-    "page_size": 100
-}
-
-response = requests.get(url, headers=headers, params=params)
-data = response.json()
-
-print(f"Total: {data['total_count']} empresas")
-print(f"Resultados na página: {data['count']}")
-```
-
-**Postman:**
-1. Método: `GET`
-2. URL: `http://localhost:8000/api/companies/search/`
-3. Params:
-   - `uf`: `SP`
-   - `capital_social_min`: `10000`
-   - `capital_social_max`: `100000`
-   - `page`: `1`
-   - `page_size`: `100`
-
-#### Exemplo 3: Buscar Empresas com Múltiplos Sócios
+**Exemplo 3: Buscar Empresas com Múltiplos Sócios**
 ```
 GET /api/companies/search/?qtd_socios_min=2&qtd_socios_max=5
 ```
 
-**Python:**
-```python
-import requests
-
-url = "http://localhost:8000/api/companies/search/"
-headers = {
-    "Authorization": "Token seu_token_aqui"
-}
-params = {
-    "qtd_socios_min": 2,
-    "qtd_socios_max": 5
-}
-
-response = requests.get(url, headers=headers, params=params)
-data = response.json()
-
-for empresa in data['results']:
-    qtd_socios = len(empresa['empresa']['socios'])
-    print(f"{empresa['empresa']['identificacao']['razao_social']}: {qtd_socios} sócios")
+**Exemplo 4: Busca Complexa com Múltiplos Filtros**
+```
+GET /api/companies/search/?cnae_principal=6201501&uf=SP&matriz_filial=1&simples=S&porte=03&capital_social_min=50000&page=1&page_size=500
 ```
 
-**Postman:**
-1. Método: `GET`
-2. URL: `http://localhost:8000/api/companies/search/`
-3. Params:
-   - `qtd_socios_min`: `2`
-   - `qtd_socios_max`: `5`
-
-#### Exemplo 4: Busca Complexa com Múltiplos Filtros
-```
-GET /api/companies/search/?cnae_principal=6201501&uf=SP&matriz_filial=1&simples=S&porte=03&capital_social_min=50000
-```
-
-**Python:**
-```python
-import requests
-
-url = "http://localhost:8000/api/companies/search/"
-headers = {
-    "Authorization": "Token seu_token_aqui"
-}
-params = {
-    "cnae_principal": "6201501",
-    "uf": "SP",
-    "matriz_filial": "1",  # Apenas matrizes
-    "simples": "S",  # Com Simples Nacional
-    "porte": "03",  # Pequeno porte
-    "capital_social_min": 50000,
-    "page": 1,
-    "page_size": 500
-}
-
-response = requests.get(url, headers=headers, params=params)
-data = response.json()
-
-print(f"Filtros aplicados: {data['filters']}")
-print(f"Total encontrado: {data['total_count']}")
-print(f"Página {data['page']} de {data['total_pages']}")
-```
-
-**Postman:**
-1. Método: `GET`
-2. URL: `http://localhost:8000/api/companies/search/`
-3. Params:
-   - `cnae_principal`: `6201501`
-   - `uf`: `SP`
-   - `matriz_filial`: `1`
-   - `simples`: `S`
-   - `porte`: `03`
-   - `capital_social_min`: `50000`
-   - `page`: `1`
-   - `page_size`: `500`
-
-#### Exemplo 5: Buscar por CNAE Secundário
+**Exemplo 5: Buscar por CNAE Secundário**
 ```
 GET /api/companies/search/?cnae_secundario=6202300
 ```
 
-**Python:**
-```python
-import requests
-
-url = "http://localhost:8000/api/companies/search/"
-headers = {
-    "Authorization": "Token seu_token_aqui"
-}
-params = {
-    "cnae_secundario": "6202300"
-}
-
-response = requests.get(url, headers=headers, params=params)
-data = response.json()
-
-print(f"Empresas com CNAE secundário 6202300: {data['total_count']}")
+**Exemplo 6: Buscar por Município**
+```
+GET /api/companies/search/?municipio=3550308
 ```
 
-**Postman:**
-1. Método: `GET`
-2. URL: `http://localhost:8000/api/companies/search/`
-3. Params:
-   - `cnae_secundario`: `6202300`
+**Exemplo 7: Buscar Empresas Ativas em SP com Simples Nacional**
+```
+GET /api/companies/search/?uf=SP&situacao_cadastral=2&simples=S
+```
+
+**Exemplo 8: Buscar Micro Empresas com MEI**
+```
+GET /api/companies/search/?porte=01&mei=S
+```
 
 **Resposta de Sucesso (200):**
 ```json
@@ -432,150 +297,162 @@ print(f"Empresas com CNAE secundário 6202300: {data['total_count']}")
 
 ---
 
+### 3. Buscar Empresas por CNAE
+
+Busca empresas que possuem um CNAE específico (principal ou secundário).
+
+**Endpoint:** `GET /companies/cnae/{cnae}/`
+
+**Parâmetros:**
+- `cnae` (path, obrigatório): Código CNAE (7 dígitos, ex: `6201501`)
+
+**Query Parameters:**
+- `page` (opcional): Número da página (padrão: 1)
+- `page_size` (opcional): Tamanho da página (padrão: 1000)
+- `cnae_sec` (opcional): Se `true`, busca também em CNAEs secundários (padrão: `false`)
+  - Valores aceitos: `true`, `1`, `yes`, `on` (case-insensitive)
+
+**Exemplo 1: Buscar por CNAE Principal**
+```
+GET /api/companies/cnae/6201501/
+```
+
+**Exemplo 2: Buscar por CNAE (incluindo secundários)**
+```
+GET /api/companies/cnae/6201501/?cnae_sec=true
+```
+
+**Exemplo 3: Com Paginação**
+```
+GET /api/companies/cnae/6201501/?page=1&page_size=100
+```
+
+**Resposta de Sucesso (200):**
+```json
+{
+  "count": 50,
+  "total_count": 150,
+  "page": 1,
+  "page_size": 1000,
+  "total_pages": 1,
+  "cnae": "6201501",
+  "cnae_sec": false,
+  "results": [
+    {
+      "estabelecimento": { ... },
+      "empresa": { ... }
+    },
+    ...
+  ]
+}
+```
+
+---
+
+### 4. Listar CNAEs
+
+Lista todos os CNAEs disponíveis com busca opcional.
+
+**Endpoint:** `GET /cnaes/`
+
+**Query Parameters:**
+- `search` (opcional): Busca por código ou descrição (ex: `6201501` ou `desenvolvimento`)
+- `page` (opcional): Número da página
+- `page_size` (opcional): Tamanho da página
+
+**Exemplo 1: Listar Todos**
+```
+GET /api/cnaes/
+```
+
+**Exemplo 2: Buscar CNAE**
+```
+GET /api/cnaes/?search=6201501
+GET /api/cnaes/?search=desenvolvimento
+```
+
+**Resposta de Sucesso (200):**
+```json
+{
+  "count": 10,
+  "next": "http://localhost:8000/api/cnaes/?page=2",
+  "previous": null,
+  "results": [
+    {
+      "codigo": "6201501",
+      "descricao": "Desenvolvimento de programas de computador sob encomenda"
+    },
+    ...
+  ]
+}
+```
+
+---
+
+### 5. Listar Municípios
+
+Lista todos os municípios disponíveis com busca opcional.
+
+**Endpoint:** `GET /municipios/`
+
+**Query Parameters:**
+- `search` (opcional): Busca por código ou descrição (ex: `3550308` ou `são paulo`)
+- `page` (opcional): Número da página
+- `page_size` (opcional): Tamanho da página
+
+**Exemplo 1: Listar Todos**
+```
+GET /api/municipios/
+```
+
+**Exemplo 2: Buscar Município**
+```
+GET /api/municipios/?search=3550308
+GET /api/municipios/?search=são paulo
+```
+
+**Resposta de Sucesso (200):**
+```json
+{
+  "count": 10,
+  "next": "http://localhost:8000/api/municipios/?page=2",
+  "previous": null,
+  "results": [
+    {
+      "codigo": "3550308",
+      "descricao": "SAO PAULO"
+    },
+    ...
+  ]
+}
+```
+
+---
+
 ## Códigos de Status HTTP
 
 - `200 OK`: Requisição bem-sucedida
 - `400 Bad Request`: Parâmetros inválidos
 - `401 Unauthorized`: Token de autenticação inválido ou ausente
 - `404 Not Found`: Recurso não encontrado (ex: CNPJ não existe)
+- `405 Method Not Allowed`: Método HTTP não permitido
 - `500 Internal Server Error`: Erro interno do servidor
 
 ---
 
-## Exemplos de Uso Avançado
+## Exemplos de Uso no Postman
 
-### Python - Classe Helper
+### Configurar Variáveis de Ambiente
 
-```python
-import requests
-from typing import Dict, List, Optional
+1. Crie um ambiente no Postman com:
+   - `base_url`: `https://consultacnpj.italommf.com.br/api`
+   - `token`: `seu_token_aqui`
 
-class CNPJAPI:
-    def __init__(self, base_url: str, token: str):
-        self.base_url = base_url.rstrip('/')
-        self.headers = {
-            "Authorization": f"Token {token}"
-        }
-    
-    def buscar_por_cnpj(self, cnpj: str) -> Dict:
-        """Busca empresa completa por CNPJ"""
-        url = f"{self.base_url}/companies/cnpj/{cnpj}/"
-        response = requests.get(url, headers=self.headers)
-        response.raise_for_status()
-        return response.json()
-    
-    def buscar_empresas(
-        self,
-        cnae_principal: Optional[str] = None,
-        cnae_secundario: Optional[str] = None,
-        uf: Optional[str] = None,
-        municipio: Optional[str] = None,
-        capital_social_min: Optional[float] = None,
-        capital_social_max: Optional[float] = None,
-        qtd_socios_min: Optional[int] = None,
-        qtd_socios_max: Optional[int] = None,
-        situacao_cadastral: Optional[str] = None,
-        matriz_filial: Optional[str] = None,
-        porte: Optional[str] = None,
-        natureza_juridica: Optional[str] = None,
-        simples: Optional[str] = None,
-        mei: Optional[str] = None,
-        page: int = 1,
-        page_size: int = 1000
-    ) -> Dict:
-        """Busca empresas com filtros"""
-        url = f"{self.base_url}/companies/search/"
-        params = {
-            "page": page,
-            "page_size": page_size
-        }
-        
-        # Adicionar apenas filtros não nulos
-        if cnae_principal:
-            params["cnae_principal"] = cnae_principal
-        if cnae_secundario:
-            params["cnae_secundario"] = cnae_secundario
-        if uf:
-            params["uf"] = uf
-        if municipio:
-            params["municipio"] = municipio
-        if capital_social_min:
-            params["capital_social_min"] = capital_social_min
-        if capital_social_max:
-            params["capital_social_max"] = capital_social_max
-        if qtd_socios_min:
-            params["qtd_socios_min"] = qtd_socios_min
-        if qtd_socios_max:
-            params["qtd_socios_max"] = qtd_socios_max
-        if situacao_cadastral:
-            params["situacao_cadastral"] = situacao_cadastral
-        if matriz_filial:
-            params["matriz_filial"] = matriz_filial
-        if porte:
-            params["porte"] = porte
-        if natureza_juridica:
-            params["natureza_juridica"] = natureza_juridica
-        if simples:
-            params["simples"] = simples
-        if mei:
-            params["mei"] = mei
-        
-        response = requests.get(url, headers=self.headers, params=params)
-        response.raise_for_status()
-        return response.json()
-    
-    def buscar_todas_paginas(
-        self,
-        **filtros
-    ) -> List[Dict]:
-        """Busca todas as páginas de resultados"""
-        todas_empresas = []
-        page = 1
-        
-        while True:
-            resultado = self.buscar_empresas(page=page, **filtros)
-            todas_empresas.extend(resultado['results'])
-            
-            if page >= resultado['total_pages']:
-                break
-            
-            page += 1
-        
-        return todas_empresas
+2. Use as variáveis nas requisições:
+   - URL: `{{base_url}}/companies/cnpj/12345678000190/`
+   - Header: `Authorization: Token {{token}}`
 
-# Exemplo de uso
-api = CNPJAPI("http://localhost:8000/api", "seu_token_aqui")
-
-# Buscar por CNPJ
-empresa = api.buscar_por_cnpj("12345678000190")
-print(empresa['empresa']['identificacao']['razao_social'])
-
-# Buscar empresas em SP com Simples Nacional
-resultado = api.buscar_empresas(uf="SP", simples="S", page_size=100)
-print(f"Encontradas {resultado['total_count']} empresas")
-
-# Buscar todas as empresas de um CNAE (todas as páginas)
-todas = api.buscar_todas_paginas(cnae_principal="6201501")
-print(f"Total: {len(todas)} empresas")
-```
-
----
-
-## Postman Collection
-
-### Importar Collection
-
-1. Abra o Postman
-2. Clique em "Import"
-3. Cole o JSON abaixo ou crie manualmente as requisições
-
-### Variáveis de Ambiente
-
-Crie um ambiente no Postman com as seguintes variáveis:
-- `base_url`: `http://localhost:8000/api`
-- `token`: `seu_token_aqui`
-
-### Exemplos de Requisições no Postman
+### Exemplos de Requisições
 
 #### 1. Buscar por CNPJ
 ```
@@ -591,9 +468,107 @@ Authorization: Token {{token}}
 
 #### 3. Buscar com Múltiplos Filtros
 ```
-GET {{base_url}}/companies/search/?uf=SP&capital_social_min=10000&capital_social_max=100000&simples=S
+GET {{base_url}}/companies/search/?uf=SP&capital_social_min=10000&capital_social_max=100000&simples=S&page=1&page_size=100
 Authorization: Token {{token}}
 ```
+
+#### 4. Buscar Empresas por CNAE (incluindo secundários)
+```
+GET {{base_url}}/companies/cnae/6201501/?cnae_sec=true&page=1&page_size=500
+Authorization: Token {{token}}
+```
+
+---
+
+## Exemplos de Uso em Python
+
+```python
+import requests
+
+BASE_URL = "https://consultacnpj.italommf.com.br/api"
+TOKEN = "seu_token_aqui"
+
+headers = {
+    "Authorization": f"Token {TOKEN}"
+}
+
+# 1. Buscar por CNPJ
+def buscar_por_cnpj(cnpj):
+    url = f"{BASE_URL}/companies/cnpj/{cnpj}/"
+    response = requests.get(url, headers=headers)
+    response.raise_for_status()
+    return response.json()
+
+# 2. Buscar empresas com filtros
+def buscar_empresas(**filtros):
+    url = f"{BASE_URL}/companies/search/"
+    params = {k: v for k, v in filtros.items() if v is not None}
+    response = requests.get(url, headers=headers, params=params)
+    response.raise_for_status()
+    return response.json()
+
+# 3. Buscar todas as páginas
+def buscar_todas_empresas(**filtros):
+    todas_empresas = []
+    page = 1
+    
+    while True:
+        resultado = buscar_empresas(page=page, page_size=1000, **filtros)
+        todas_empresas.extend(resultado['results'])
+        
+        if page >= resultado['total_pages']:
+            break
+        
+        page += 1
+    
+    return todas_empresas
+
+# Exemplos de uso
+empresa = buscar_por_cnpj("12345678000190")
+print(empresa['empresa']['identificacao']['razao_social'])
+
+# Buscar empresas em SP com Simples Nacional
+resultado = buscar_empresas(uf="SP", simples="S", page_size=100)
+print(f"Encontradas {resultado['total_count']} empresas")
+
+# Buscar todas as empresas de um CNAE
+todas = buscar_todas_empresas(cnae_principal="6201501")
+print(f"Total: {len(todas)} empresas")
+```
+
+---
+
+## Tabela de Referência: Códigos Comuns
+
+### Situação Cadastral
+- `"2"`: Ativa
+- `"3"`: Suspensa
+- `"4"`: Inapta
+- `"8"`: Baixada
+
+### Matriz/Filial
+- `"1"`: Matriz
+- `"2"`: Filial
+
+### Porte
+- `"00"`: Não informado
+- `"01"`: Micro empresa
+- `"03"`: Empresa de pequeno porte
+- `"05"`: Demais
+
+### Simples/MEI
+- `"S"`: Sim
+- `"N"`: Não
+
+---
+
+## Limites e Boas Práticas
+
+1. **Paginação**: Sempre use paginação para grandes volumes de dados. O padrão é 1000 por página.
+2. **Filtros Específicos**: Use filtros específicos para reduzir o volume de dados retornados.
+3. **Rate Limiting**: Respeite os limites de requisições por segundo.
+4. **Cache**: Considere cachear resultados quando apropriado.
+5. **Tratamento de Erros**: Sempre trate erros HTTP adequadamente.
 
 ---
 
@@ -620,17 +595,6 @@ except requests.exceptions.RequestException as e:
 
 ---
 
-## Limites e Boas Práticas
-
-1. **Paginação**: Sempre use paginação para grandes volumes de dados
-2. **Rate Limiting**: Respeite os limites de requisições por segundo
-3. **Cache**: Considere cachear resultados quando apropriado
-4. **Filtros**: Use filtros específicos para reduzir o volume de dados retornados
-5. **Tratamento de Erros**: Sempre trate erros HTTP adequadamente
-
----
-
 ## Suporte
 
 Para dúvidas ou problemas, consulte a documentação do Django REST Framework ou entre em contato com a equipe de desenvolvimento.
-
