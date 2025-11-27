@@ -19,13 +19,14 @@ from datetime import datetime
 # CONFIGURAÇÕES GERAIS
 # =================================================================================
 # BASE_DIR pode ser sobrescrito por variável de ambiente ou usa padrão
-BASE_DIR = Path(os.environ.get('CNPJ_BASE_DIR', r"d:/Projeto CNPJ"))
+# Padrão para VPS, mas pode ser sobrescrito por variável de ambiente
+BASE_DIR = Path(os.environ.get('CNPJ_BASE_DIR', "/var/www/cnpj_api"))
 DOWNLOADS_DIR = BASE_DIR / "downloads"
 DATA_DIR = BASE_DIR / "data"
 
 DB_HOST = os.environ.get('DB_HOST', "localhost")
 DB_PORT = os.environ.get('DB_PORT', "5432")
-DB_USER = os.environ.get('DB_USER', "postgres")
+DB_USER = os.environ.get('DB_USER', "cnpj_user")
 DB_NAME = os.environ.get('DB_NAME', "cnpjdb")
 
 # Mapeamento de arquivos para tabelas e colunas
