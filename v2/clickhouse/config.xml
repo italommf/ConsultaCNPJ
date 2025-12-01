@@ -1,0 +1,17 @@
+<?xml version="1.0"?>
+<clickhouse>
+    <merge_tree>
+        <!-- Aumentar limite de partes quebradas para permitir limpeza de tabelas corrompidas -->
+        <max_suspicious_broken_parts>10000</max_suspicious_broken_parts>
+    </merge_tree>
+    
+    <profiles>
+        <default>
+            <!-- Aumentar limite de partições por INSERT para permitir inserções grandes -->
+            <max_partitions_per_insert_block>10000</max_partitions_per_insert_block>
+        </default>
+    </profiles>
+</clickhouse>
+
+
+

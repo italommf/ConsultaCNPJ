@@ -55,6 +55,16 @@ Thumbs.db
 # Dados grandes - não devem ir para o repositório
 data/
 downloads/
+*.log
+import_log.txt
+complete_run.log
+full_run.log
+test_run.log
+run.log
+
+# ClickHouse data
+clickhouse/data/
+clickhouse/store/
 
 # Arquivos temporários
 *.tmp
