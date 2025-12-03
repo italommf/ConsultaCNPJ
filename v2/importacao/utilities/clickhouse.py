@@ -86,6 +86,13 @@ def criar_banco_e_schema(client: Client, schema_file: Path) -> bool:
 
     logger.info("Criando banco de dados e schema (%s)...", schema_file.name)
     try:
+        # Habilitar LowCardinality (necessário para esta versão do ClickHouse)
+        # try:
+        #     client.execute("SET allow_experimental_low_cardinality_type = 1")
+        #     logger.debug("LowCardinality habilitado")
+        # except Exception:
+        #     logger.warning("Não foi possível habilitar LowCardinality (pode não ser necessário)")
+        
         with open(schema_file, "r", encoding="utf-8") as file:
             schema_sql = file.read()
 
@@ -112,20 +119,51 @@ def criar_banco_e_schema(client: Client, schema_file: Path) -> bool:
                 statements.append(current_statement.strip())
                 current_statement = ""
 
+        # Adicionar qualquer statement restante
+        if current_statement.strip():
+            statements.append(current_statement.strip())
+
+        tabelas_criadas = 0
         for statement in statements:
             if not statement:
                 continue
+            # Pular comandos USE - já estamos conectados ao banco correto
+            if statement.strip().upper().startswith("USE "):
+                logger.debug("Pulando comando USE (já conectado ao banco)")
+                continue
             try:
                 client.execute(statement)
+                # Verificar se é um CREATE TABLE
+                if statement.strip().upper().startswith("CREATE TABLE"):
+                    tabelas_criadas += 1
+                    logger.debug("Tabela criada/verificada")
             except Exception as exc:
                 error_str = str(exc).lower()
-                if "already exists" not in error_str and "exists" not in error_str:
-                    logger.warning("Erro ao executar statement (%s): %s", statement[:40], exc)
+                # Ignorar apenas erros de "already exists" ou "table already exists"
+                if "already exists" in error_str or "table already exists" in error_str:
+                    logger.debug("Tabela já existe (ignorando): %s", statement[:50])
+                    # Contar como criada mesmo se já existir
+                    if statement.strip().upper().startswith("CREATE TABLE"):
+                        tabelas_criadas += 1
+                else:
+                    logger.error("Erro ao executar statement: %s", exc)
+                    logger.error("Statement problemático: %s", statement[:100])
+                    # Não retornar False aqui, continuar tentando criar outras tabelas
 
-        logger.info("✓ Banco de dados e schema verificados")
+        logger.info("  ✓ Schema processado (%s tabelas criadas/verificadas)", tabelas_criadas)
+        
+        # Verificar se as tabelas foram criadas
+        try:
+            tabelas = client.execute("SHOW TABLES")
+            logger.info("  ✓ Tabelas no banco: %s", [t[0] for t in tabelas] if tabelas else "nenhuma")
+        except Exception as exc:
+            logger.warning("Não foi possível verificar tabelas: %s", exc)
+        
         return True
     except Exception as exc:
         logger.error("Erro ao criar schema: %s", exc)
+        import traceback
+        logger.error(traceback.format_exc())
         return False
 
 
@@ -159,10 +197,10 @@ def limpar_banco_dados(client: Client, tabelas: Optional[List[str]] = None) -> b
         database_name = "cnpj"
 
     # Aumentar limite de partes quebradas para permitir remoção de tabelas corrompidas
-    try:
-        client.execute("SET max_suspicious_broken_parts = 10000")
-    except Exception:
-        pass  # Se não conseguir, continua mesmo assim
+    # try:
+    #     client.execute("SET max_suspicious_broken_parts = 10000")
+    # except Exception:
+    #     pass  # Se não conseguir, continua mesmo assim
 
     tabelas_removidas = []
     tabelas_com_erro = []
@@ -173,7 +211,7 @@ def limpar_banco_dados(client: Client, tabelas: Optional[List[str]] = None) -> b
             
             # Estratégia 1: DROP direto (mais agressivo - remove tudo)
             try:
-                client.execute(f"DROP TABLE IF EXISTS {tabela} NO DELAY")
+                client.execute(f"DROP TABLE IF EXISTS {tabela}")
                 tabelas_removidas.append(tabela)
                 logger.info("  ✓ %s removida completamente", tabela)
                 removida = True
@@ -237,7 +275,7 @@ def limpar_banco_dados(client: Client, tabelas: Optional[List[str]] = None) -> b
                 client_new.execute("SELECT 1")
                 
                 # Substituir o cliente (não podemos fazer isso diretamente, então retornamos True e o processo continuará)
-                logger.info("✓ Banco de dados completamente limpo (banco removido e recriado)")
+                logger.info("  ✓ Banco de dados completamente limpo (banco removido e recriado)")
                 logger.warning("⚠ É necessário reconectar ao banco. O processo continuará na próxima etapa.")
                 return True
                 
@@ -274,7 +312,7 @@ def limpar_banco_dados(client: Client, tabelas: Optional[List[str]] = None) -> b
                     logger.error("✗ Erro ao remover/recriar banco: %s", db_exc)
                     return False
 
-        logger.info("✓ Banco de dados completamente limpo (%s tabelas removidas)", len(tabelas_removidas))
+        logger.info("  ✓ Banco de dados completamente limpo (%s tabelas removidas)", len(tabelas_removidas))
         return True
         
     except Exception as exc:
@@ -285,9 +323,14 @@ def limpar_banco_dados(client: Client, tabelas: Optional[List[str]] = None) -> b
 def configurar_sessao_clickhouse(client: Client) -> None:
     """Configura otimizações de sessão do ClickHouse"""
     try:
-        client.execute("SET max_partitions_per_insert_block = 10000")
+        # max_partitions_per_insert_block não existe nesta versão, removido
         client.execute("SET send_timeout = 600")
         client.execute("SET receive_timeout = 600")
+        # Habilitar LowCardinality se necessário
+        # try:
+        #     client.execute("SET allow_experimental_low_cardinality_type = 1")
+        # except Exception:
+        #     pass
         logger.info("✓ Otimizações de sessão aplicadas")
     except Exception as exc:
         logger.warning("⚠ Erro ao configurar sessão: %s", exc)

@@ -8,7 +8,7 @@ from ..schemas import (
     SearchResponse,
     Empresa,
     Simples,
-    Socio
+    Socio,
 )
 from ..clickhouse_client import get_clickhouse_client
 from ..utils import to_str, format_date, format_capital_social
@@ -328,4 +328,126 @@ async def search_companies(
         total_pages=total_pages,
         results=results
     )
+
+
+@router.get("/cnae/{cnae}", response_model=SearchResponse)
+async def search_by_cnae(
+    cnae: str,
+    cnae_sec: bool = Query(
+        False,
+        description="Se true, busca também em CNAEs secundários (cnae_fiscal_secundaria)",
+    ),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(100, ge=1, le=1000),
+    current_user: dict = Depends(auth.get_current_user),
+):
+    """
+    Busca empresas por CNAE (replica a lógica do endpoint /companies/cnae/{cnae} da v1).
+
+    - `cnae`: código CNAE de 7 dígitos.
+    - `cnae_sec=true`: inclui buscas em CNAEs secundários (campo `cnae_fiscal_secundaria`).
+    """
+    # Limpar e validar CNAE
+    cnae_clean = "".join(filter(str.isdigit, cnae))[:7]
+    if len(cnae_clean) != 7:
+        raise HTTPException(status_code=400, detail="CNAE deve ter 7 dígitos")
+
+    client = get_clickhouse_client()
+
+    try:
+        params = {"cnae": cnae_clean}
+
+        if cnae_sec:
+            where_clause = """
+                (
+                    cnae_fiscal = %(cnae)s
+                    OR cnae_fiscal_secundaria = %(cnae)s
+                    OR like(cnae_fiscal_secundaria, concat(%(cnae)s, ',%'))
+                    OR like(cnae_fiscal_secundaria, concat('%,', %(cnae)s, ',%'))
+                    OR like(cnae_fiscal_secundaria, concat('%,', %(cnae)s))
+                )
+            """
+        else:
+            where_clause = "cnae_fiscal = %(cnae)s"
+
+        # Paginação
+        offset = (page - 1) * page_size
+
+        # Contagem total (número de estabelecimentos / empresas para esse CNAE)
+        count_query = f"SELECT count() FROM estabelecimentos WHERE {where_clause}"
+        total = client.execute(count_query, params)[0][0]
+
+        # Dados paginados (mesma seleção de campos do /companies/search)
+        data_query = f"""
+            SELECT 
+                cnpj, cnpj_basico, cnpj_ordem, cnpj_dv, matriz_filial, nome_fantasia,
+                situacao_cadastral, toString(data_situacao) as data_situacao,
+                motivo_situacao, cidade_exterior, pais, toString(data_inicio) as data_inicio,
+                cnae_fiscal, cnae_fiscal_secundaria, tipo_logradouro, logradouro,
+                numero, complemento, bairro, cep, uf, municipio,
+                ddd_1, telefone_1, ddd_2, telefone_2, ddd_fax, fax,
+                email, situacao_especial, toString(data_situacao_especial) as data_situacao_especial
+            FROM estabelecimentos
+            WHERE {where_clause}
+            ORDER BY cnpj
+            LIMIT %(limit)s OFFSET %(offset)s
+        """
+        params["limit"] = page_size
+        params["offset"] = offset
+
+        rows = client.execute(data_query, params)
+
+        results = []
+        for row in rows:
+            results.append(
+                Estabelecimento(
+                    cnpj=to_str(row[0]),
+                    cnpj_basico=to_str(row[1]),
+                    cnpj_ordem=to_str(row[2]),
+                    cnpj_dv=to_str(row[3]),
+                    matriz_filial=to_str(row[4]),
+                    nome_fantasia=to_str(row[5]),
+                    situacao_cadastral=to_str(row[6]),
+                    data_situacao=format_date(to_str(row[7])),
+                    motivo_situacao=to_str(row[8]),
+                    cidade_exterior=to_str(row[9]),
+                    pais=to_str(row[10]),
+                    data_inicio=format_date(to_str(row[11])),
+                    cnae_fiscal=to_str(row[12]),
+                    cnae_fiscal_secundaria=to_str(row[13]),
+                    tipo_logradouro=to_str(row[14]),
+                    logradouro=to_str(row[15]),
+                    numero=to_str(row[16]),
+                    complemento=to_str(row[17]),
+                    bairro=to_str(row[18]),
+                    cep=to_str(row[19]),
+                    uf=to_str(row[20]),
+                    municipio=to_str(row[21]),
+                    ddd_1=to_str(row[22]),
+                    telefone_1=to_str(row[23]),
+                    ddd_2=to_str(row[24]),
+                    telefone_2=to_str(row[25]),
+                    ddd_fax=to_str(row[26]),
+                    fax=to_str(row[27]),
+                    email=to_str(row[28]),
+                    situacao_especial=to_str(row[29]),
+                    data_situacao_especial=format_date(to_str(row[30])),
+                )
+            )
+
+        total_pages = (total + page_size - 1) // page_size
+
+        return SearchResponse(
+            total=total,
+            page=page,
+            page_size=page_size,
+            total_pages=total_pages,
+            results=results,
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Erro ao buscar empresas por CNAE {cnae_clean}: {e}")
+        raise HTTPException(status_code=500, detail=f"Erro interno: {str(e)}")
 

@@ -61,10 +61,9 @@ def executar():
     garantir_descompactacao(downloads_dir, data_dir)
 
     # Etapa 4: Contagem de linhas dos arquivos CSV (comentado para testes)
-    # print_step(4, 7, "Contagem de Linhas dos Arquivos CSV")
-    # contagens_csv = contar_linhas_arquivos(data_dir)
-    # imprimir_resumo_contagens(contagens_csv)
-    contagens_csv = {}  # Placeholder vazio para não quebrar a verificação final
+    print_step(4, 7, "Contagem de Linhas dos Arquivos CSV")
+    contagens_csv = contar_linhas_arquivos(data_dir)
+    imprimir_resumo_contagens(contagens_csv)
 
     # Etapa 5: Preparação do banco de dados
     print_step(5, 7, "Preparação do Banco de Dados")
@@ -133,26 +132,26 @@ def executar_importacoes(client, data_dir: Path) -> None:
     importer = ClickHouseImporter(client)
 
     # Comentado para teste - importação de domínio
-    # logger.info("\n📋 Importando tabelas de domínio...")
-    # dominio_tabelas = {
-    #     "CNAE": "cnaes",
-    #     "MOTI": "motivos",
-    #     "MUNIC": "municipios",
-    #     "NATJU": "naturezas",
-    #     "PAIS": "paises",
-    #     "QUALS": "qualificacoes",
-    # }
-    # for padrao, tabela in dominio_tabelas.items():
-    #     for arquivo in encontrar_arquivos_csv(data_dir, padrao):
-    #         if validar_arquivo(arquivo):
-    #             try:
-    #                 importer.importar_dominio(arquivo, tabela)
-    #             except Exception as exc:
-    #                 logger.error("✗ Erro ao importar %s: %s", arquivo.name, exc)
+    logger.info("\n📋 Importando tabelas de domínio...")
+    dominio_tabelas = {
+        "CNAE": "cnaes",
+        "MOTI": "motivos",
+        "MUNIC": "municipios",
+        "NATJU": "naturezas",
+        "PAIS": "paises",
+        "QUALS": "qualificacoes",
+    }
+    for padrao, tabela in dominio_tabelas.items():
+        for arquivo in encontrar_arquivos_csv(data_dir, padrao):
+            if validar_arquivo(arquivo):
+                try:
+                    importer.importar_dominio(arquivo, tabela)
+                except Exception as exc:
+                    logger.error("✗ Erro ao importar %s: %s", arquivo.name, exc)
 
     # Comentado para teste - importação de empresas
-    # logger.info("\n🏢 Importando empresas...")
-    # importar_lista(importer.importar_empresas, data_dir, "EMPRE")
+    logger.info("\n🏢 Importando empresas...")
+    importar_lista(importer.importar_empresas, data_dir, "EMPRE")
 
     logger.info("\n🏪 Importando estabelecimentos...")
     importar_lista(importer.importar_estabelecimentos, data_dir, "ESTABELE")

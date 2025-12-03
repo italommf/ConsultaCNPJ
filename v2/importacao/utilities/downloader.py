@@ -68,7 +68,7 @@ def download_file(url: str, dest_folder: Path):
 
 
 def baixar_arquivos_mes_atual(downloads_dir: Path):
-    """Baixa os arquivos do mês atual da Receita Federal."""
+    """Baixa os arquivos do mês atual da Receita Federal. Se não encontrar (404), tenta o mês anterior."""
     logger.info("Baixando arquivos do mês atual da Receita Federal...")
     
     target_date = datetime.now().strftime("%Y-%m")
@@ -79,10 +79,35 @@ def baixar_arquivos_mes_atual(downloads_dir: Path):
     try:
         response = requests.get(target_url, timeout=30)
         response.raise_for_status()
+    except requests.exceptions.HTTPError as e:
+        if e.response.status_code == 404:
+            # Se não encontrar o mês atual, tentar o mês anterior
+            logger.warning(f"Mês atual ({target_date}) não encontrado. Tentando mês anterior...")
+            # Calcular mês anterior
+            now = datetime.now()
+            if now.month == 1:
+                previous_month = datetime(now.year - 1, 12, 1)
+            else:
+                previous_month = datetime(now.year, now.month - 1, 1)
+            target_date = previous_month.strftime("%Y-%m")
+            target_url = urljoin(CNPJ_BASE_URL, f"{target_date}/")
+            logger.info(f"Acessando {target_url}...")
+            try:
+                response = requests.get(target_url, timeout=30)
+                response.raise_for_status()
+            except requests.exceptions.RequestException as e2:
+                logger.error(f"Erro ao acessar URL do mês anterior: {e2}")
+                logger.error("Verifique se a data está correta e se a página existe.")
+                return False
+        else:
+            logger.error(f"Erro ao acessar URL: {e}")
+            logger.error("Verifique se a data está correta e se a página existe.")
+            return False
     except requests.exceptions.RequestException as e:
         logger.error(f"Erro ao acessar URL: {e}")
         logger.error("Verifique se a data está correta e se a página existe.")
         return False
+
 
     soup = BeautifulSoup(response.text, 'html.parser')
     

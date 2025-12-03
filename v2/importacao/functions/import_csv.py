@@ -1,9 +1,10 @@
 """Importador CSV otimizado para ClickHouse"""
-import csv
 import sys
 from pathlib import Path
 from typing import Optional
 from datetime import date
+
+import polars as pl
 from clickhouse_driver import Client
 
 # Ajuste de path para suportar execução direta
@@ -35,11 +36,12 @@ class ClickHouseImporter:
     
     def __init__(self, client: Client):
         self.client = client
-        # Configurar limite de partições e timeouts aumentados
+        # Configurar timeouts aumentados
         try:
-            client.execute("SET max_partitions_per_insert_block = 10000")
             client.execute("SET send_timeout = 3600")  # 1 hora
             client.execute("SET receive_timeout = 3600")  # 1 hora
+            # Permitir muitos partitions por bloco de INSERT (necessário para estabelecimentos)
+            client.execute("SET max_partitions_per_insert_block = 10000")
         except:
             pass  # Ignorar se não conseguir configurar
     
@@ -70,56 +72,87 @@ class ClickHouseImporter:
         return date(1970, 1, 1)
     
     def importar_empresas(self, arquivo: Path) -> int:
-        """Importa arquivo completo de empresas de uma vez"""
+        """Importa arquivo completo de empresas de uma vez (Polars vetorizado, sem iter_rows)"""
         logger.info(f"Importando empresas de {arquivo.name}...")
         
         linhas_processadas = 0
-        dados = []
         
         try:
-            with open(arquivo, 'r', encoding='utf-8', errors='replace', newline='') as f:
-                reader = csv.reader(f, delimiter=';', quotechar='"')
-                
-                for linha_num, row in enumerate(reader, start=1):
-                    # Tratar linhas quebradas
-                    if len(row) < 7:
-                        # Preencher colunas faltantes
-                        while len(row) < 7:
-                            row.append('')
-                    
-                    # Normalizar dados
-                    cnpj_basico = normalizar_codigo(row[0], 8) or ''
-                    razao_social = limpar_string(row[1]) or ''
-                    natureza_juridica = normalizar_codigo(row[2], 4) or ''
-                    qualificacao_do_responsavel = normalizar_codigo(row[3], 2) or ''
-                    capital_social = normalizar_capital_social(row[4]) or 0
-                    porte = normalizar_codigo(row[5], 2) or ''
-                    ente_federativo = limpar_string(row[6]) or ''
-                    
-                    dados.append([
-                        str(cnpj_basico),
-                        str(razao_social),
-                        str(natureza_juridica),
-                        str(qualificacao_do_responsavel),
-                        capital_social,
-                        str(porte),
-                        str(ente_federativo)
-                    ])
-                    
-                    # Log de progresso a cada 100k linhas
-                    if len(dados) % 100_000 == 0:
-                        logger.info(f"  Lidas {len(dados):,} linhas...")
-            
-            # Inserir tudo de uma vez
-            if dados:
-                logger.info(f"  Inserindo {len(dados):,} registros no banco...")
-                try:
-                    self.client.execute("INSERT INTO empresas VALUES", dados)
-                    linhas_processadas = len(dados)
-                    logger.info(f"✓ Importadas {linhas_processadas:,} empresas de {arquivo.name}")
-                except Exception as e:
-                    logger.error(f"✗ Erro ao inserir empresas: {e}")
-                    raise
+            df = pl.read_csv(
+                arquivo,
+                separator=';',
+                has_header=False,
+                infer_schema_length=0,
+                ignore_errors=True,
+                encoding="utf8-lossy",  # arquivos da Receita podem ter bytes inválidos
+            )
+
+            # Renomear colunas para padrão col0, col1, ...
+            df = df.rename({name: f"col{i}" for i, name in enumerate(df.columns)})
+
+            # Garantir pelo menos 7 colunas
+            for i in range(7):
+                col_name = f"col{i}"
+                if col_name not in df.columns:
+                    df = df.with_columns(pl.lit("").alias(col_name))
+
+            # Helpers vetorizados simples
+            def clean_col(name: str) -> pl.Expr:
+                return (
+                    pl.col(name)
+                    .cast(pl.Utf8)
+                    .fill_null("")
+                    .str.replace("\x00", "")
+                    .str.strip_chars()
+                )
+
+            # Normalizações vetorizadas, reutilizando suas funções Python
+            df = df.with_columns([
+                pl.col("col0")
+                    .map_elements(lambda x: normalizar_codigo(x, 8) or "", return_dtype=pl.Utf8)
+                    .alias("cnpj_basico"),
+                clean_col("col1")
+                    .map_elements(lambda x: limpar_string(x) or "", return_dtype=pl.Utf8)
+                    .alias("razao_social"),
+                pl.col("col2")
+                    .map_elements(lambda x: normalizar_codigo(x, 4) or "", return_dtype=pl.Utf8)
+                    .alias("natureza_juridica"),
+                pl.col("col3")
+                    .map_elements(lambda x: normalizar_codigo(x, 2) or "", return_dtype=pl.Utf8)
+                    .alias("qualificacao_do_responsavel"),
+                pl.col("col4")
+                    .map_elements(lambda x: normalizar_capital_social(x) or 0, return_dtype=pl.Int64)
+                    .alias("capital_social"),
+                pl.col("col5")
+                    .map_elements(lambda x: normalizar_codigo(x, 2) or "", return_dtype=pl.Utf8)
+                    .alias("porte"),
+                clean_col("col6")
+                    .map_elements(lambda x: limpar_string(x) or "", return_dtype=pl.Utf8)
+                    .alias("ente_federativo"),
+            ])
+
+            colunas_ordem = [
+                "cnpj_basico",
+                "razao_social",
+                "natureza_juridica",
+                "qualificacao_do_responsavel",
+                "capital_social",
+                "porte",
+                "ente_federativo",
+            ]
+
+            if df.height > 0:
+                tabela_df = df.select(colunas_ordem)
+                BATCH_SIZE = 500_000
+
+                for offset in range(0, tabela_df.height, BATCH_SIZE):
+                    chunk = tabela_df.slice(offset, BATCH_SIZE)
+                    batch = chunk.to_numpy().tolist()
+                    if not batch:
+                        continue
+                    self.client.execute("INSERT INTO empresas VALUES", batch)
+                    linhas_processadas += len(batch)
+                    logger.info(f"  Inseridas {linhas_processadas:,} linhas de empresas até agora...")
         
         except Exception as e:
             logger.error(f"Erro ao importar {arquivo.name}: {e}")
@@ -134,65 +167,141 @@ class ClickHouseImporter:
         linhas_processadas = 0
         dados = []
         
-        # Funções inline otimizadas
-        def quick_zfill(s, size):
-            if not s:
-                return '0' * size
-            return s.strip().zfill(size)[:size]
-        
-        def quick_clean(s):
-            if not s:
-                return ''
-            return s.strip().replace('\x00', '')
-        
         try:
-            with open(arquivo, 'r', encoding='utf-8', errors='replace', newline='') as f:
-                reader = csv.reader(f, delimiter=';', quotechar='"')
-                
-                for linha_num, row in enumerate(reader, start=1):
-                    # Preencher colunas faltantes
-                    if len(row) < 29:
-                        row.extend([''] * (29 - len(row)))
-                    
-                    # Normalização otimizada
-                    cnpj_basico = quick_zfill(row[0], 8)
-                    cnpj_ordem = quick_zfill(row[1], 4)
-                    cnpj_dv = quick_zfill(row[2], 2)
-                    cnpj = f"{cnpj_basico}{cnpj_ordem}{cnpj_dv}"
-                    
-                    # Datas
-                    data_situacao = self._normalize_date(normalizar_data(row[6]) if row[6] else None)
-                    data_inicio = self._normalize_date(normalizar_data(row[10]) if row[10] else None)
-                    data_situacao_especial = self._normalize_date(normalizar_data(row[28]) if len(row) > 28 and row[28] else None)
-                    
-                    dados.append([
-                        cnpj_basico, cnpj_ordem, cnpj_dv, cnpj,
-                        quick_zfill(row[3], 1), quick_clean(row[4]), quick_zfill(row[5], 2),
-                        data_situacao, quick_zfill(row[7], 2), quick_clean(row[8]),
-                        quick_zfill(row[9], 3), data_inicio, quick_zfill(row[11], 7),
-                        quick_clean(row[12]), quick_clean(row[13]), quick_clean(row[14]),
-                        quick_clean(row[15]), quick_clean(row[16]), quick_clean(row[17]),
-                        quick_zfill(row[18], 8), quick_zfill(row[19], 2), quick_zfill(row[20], 4),
-                        quick_zfill(row[21], 2), quick_clean(row[22]), quick_zfill(row[23], 2),
-                        quick_clean(row[24]), quick_zfill(row[25], 2), quick_clean(row[26]),
-                        quick_clean(row[27]), quick_clean(row[28]) if len(row) > 28 else '',
-                        data_situacao_especial
-                    ])
-                    
-                    # Log de progresso a cada 100k linhas
-                    if len(dados) % 100_000 == 0:
-                        logger.info(f"  Lidas {len(dados):,} linhas...")
-            
-            # Inserir tudo de uma vez
-            if dados:
-                logger.info(f"  Inserindo {len(dados):,} registros no banco...")
-                try:
-                    self.client.execute("INSERT INTO estabelecimentos VALUES", dados)
-                    linhas_processadas = len(dados)
-                    logger.info(f"✓ Importados {linhas_processadas:,} estabelecimentos de {arquivo.name}")
-                except Exception as e:
-                    logger.error(f"✗ Erro ao inserir estabelecimentos: {e}")
-                    raise
+            df = pl.read_csv(
+                arquivo,
+                separator=';',
+                has_header=False,
+                infer_schema_length=0,
+                ignore_errors=True,
+                encoding="utf8-lossy",
+            )
+
+            # Renomear colunas para um padrão conhecido (col0, col1, ...)
+            df = df.rename({name: f"col{i}" for i, name in enumerate(df.columns)})
+
+            # Garantir que temos ao menos 29 colunas (preencher ausentes com string vazia)
+            for i in range(29):
+                col_name = f"col{i}"
+                if col_name not in df.columns:
+                    df = df.with_columns(pl.lit("").alias(col_name))
+
+            # Helpers vetorizados
+            def zfill_col(name: str, size: int) -> pl.Expr:
+                return (
+                    pl.col(name)
+                    .cast(pl.Utf8)
+                    .fill_null("")
+                    .str.replace("\x00", "")
+                    .str.strip_chars()
+                    .str.zfill(size)
+                    .str.slice(0, size)
+                )
+
+            def clean_col(name: str) -> pl.Expr:
+                return (
+                    pl.col(name)
+                    .cast(pl.Utf8)
+                    .fill_null("")
+                    .str.replace("\x00", "")
+                    .str.strip_chars()
+                )
+
+            default_date = date(1970, 1, 1)
+
+            def parse_date(name: str) -> pl.Expr:
+                base = pl.col(name).cast(pl.Utf8).str.strip_chars()
+                # Tentar primeiro YYYY-MM-DD, depois YYYYMMDD; fallback 1970-01-01
+                d1 = base.str.strptime(pl.Date, "%Y-%m-%d", strict=False)
+                d2 = base.str.strptime(pl.Date, "%Y%m%d", strict=False)
+                return pl.coalesce(d1, d2, pl.lit(default_date))
+
+            # Normalizações vetorizadas
+            df = df.with_columns([
+                zfill_col("col0", 8).alias("cnpj_basico"),
+                zfill_col("col1", 4).alias("cnpj_ordem"),
+                zfill_col("col2", 2).alias("cnpj_dv"),
+            ])
+
+            df = df.with_columns([
+                (pl.col("cnpj_basico") + pl.col("cnpj_ordem") + pl.col("cnpj_dv")).alias("cnpj"),
+                zfill_col("col3", 1).alias("matriz_filial"),
+                clean_col("col4").alias("nome_fantasia"),
+                zfill_col("col5", 2).alias("situacao_cadastral"),
+                parse_date("col6").alias("data_situacao"),
+                zfill_col("col7", 2).alias("motivo_situacao"),
+                clean_col("col8").alias("cidade_exterior"),
+                zfill_col("col9", 3).alias("pais"),
+                parse_date("col10").alias("data_inicio"),
+                zfill_col("col11", 7).alias("cnae_fiscal"),
+                clean_col("col12").alias("cnae_fiscal_secundaria"),
+                clean_col("col13").alias("tipo_logradouro"),
+                clean_col("col14").alias("logradouro"),
+                clean_col("col15").alias("numero"),
+                clean_col("col16").alias("complemento"),
+                clean_col("col17").alias("bairro"),
+                zfill_col("col18", 8).alias("cep"),
+                zfill_col("col19", 2).alias("uf"),
+                zfill_col("col20", 4).alias("municipio"),
+                zfill_col("col21", 2).alias("ddd_1"),
+                clean_col("col22").alias("telefone_1"),
+                zfill_col("col23", 2).alias("ddd_2"),
+                clean_col("col24").alias("telefone_2"),
+                zfill_col("col25", 2).alias("ddd_fax"),
+                clean_col("col26").alias("fax"),
+                clean_col("col27").alias("email"),
+                clean_col("col28").alias("situacao_especial"),
+                parse_date("col28").alias("data_situacao_especial"),
+            ])
+
+            # Extrair na ordem exata do schema do ClickHouse
+            colunas_ordem = [
+                "cnpj_basico",
+                "cnpj_ordem",
+                "cnpj_dv",
+                "cnpj",
+                "matriz_filial",
+                "nome_fantasia",
+                "situacao_cadastral",
+                "data_situacao",
+                "motivo_situacao",
+                "cidade_exterior",
+                "pais",
+                "data_inicio",
+                "cnae_fiscal",
+                "cnae_fiscal_secundaria",
+                "tipo_logradouro",
+                "logradouro",
+                "numero",
+                "complemento",
+                "bairro",
+                "cep",
+                "uf",
+                "municipio",
+                "ddd_1",
+                "telefone_1",
+                "ddd_2",
+                "telefone_2",
+                "ddd_fax",
+                "fax",
+                "email",
+                "situacao_especial",
+                "data_situacao_especial",
+            ]
+
+            if df.height > 0:
+                # Inserir em chunks usando apenas operações vetorizadas (sem iter_rows)
+                tabela_df = df.select(colunas_ordem)
+                BATCH_SIZE = 500_000
+
+                for offset in range(0, tabela_df.height, BATCH_SIZE):
+                    chunk = tabela_df.slice(offset, BATCH_SIZE)
+                    batch = chunk.to_numpy().tolist()
+                    if not batch:
+                        continue
+                    self.client.execute("INSERT INTO estabelecimentos VALUES", batch)
+                    linhas_processadas += len(batch)
+                    logger.info(f"  Inseridas {linhas_processadas:,} linhas de estabelecimentos até agora...")
         
         except Exception as e:
             logger.error(f"Erro ao importar {arquivo.name}: {e}")
@@ -201,53 +310,106 @@ class ClickHouseImporter:
         return linhas_processadas
     
     def importar_socios(self, arquivo: Path) -> int:
-        """Importa arquivo completo de sócios de uma vez"""
+        """Importa arquivo completo de sócios de uma vez (Polars vetorizado, sem iter_rows)"""
         logger.info(f"Importando sócios de {arquivo.name}...")
         
         linhas_processadas = 0
-        dados = []
         
         try:
-            with open(arquivo, 'r', encoding='utf-8', errors='replace', newline='') as f:
-                reader = csv.reader(f, delimiter=';', quotechar='"')
-                
-                for linha_num, row in enumerate(reader, start=1):
-                    if len(row) < 11:
-                        while len(row) < 11:
-                            row.append('')
-                    
-                    # Normalizar datas
-                    data_entrada_raw = normalizar_data(row[5]) if len(row) > 5 else None
-                    data_entrada = self._normalize_date(data_entrada_raw)
-                    
-                    dados.append([
-                        str(normalizar_codigo(row[0], 8) or ''),
-                        str(normalizar_codigo(row[1], 1) or ''),
-                        str(limpar_string(row[2]) or ''),
-                        str(limpar_string(row[3]) or ''),
-                        str(normalizar_codigo(row[4], 2) or ''),
-                        data_entrada,
-                        str(normalizar_codigo(row[6], 3) or ''),
-                        str(normalizar_codigo(row[7], 1) or ''),
-                        str(limpar_string(row[8]) or ''),
-                        str(normalizar_codigo(row[9], 2) or ''),
-                        str(normalizar_codigo(row[10], 1) or '')
-                    ])
-                    
-                    # Log de progresso a cada 100k linhas
-                    if len(dados) % 100_000 == 0:
-                        logger.info(f"  Lidas {len(dados):,} linhas...")
-            
-            # Inserir tudo de uma vez
-            if dados:
-                logger.info(f"  Inserindo {len(dados):,} registros no banco...")
-                try:
-                    self.client.execute("INSERT INTO socios VALUES", dados)
-                    linhas_processadas = len(dados)
-                    logger.info(f"✓ Importados {linhas_processadas:,} sócios de {arquivo.name}")
-                except Exception as e:
-                    logger.error(f"✗ Erro ao inserir sócios: {e}")
-                    raise
+            df = pl.read_csv(
+                arquivo,
+                separator=';',
+                has_header=False,
+                infer_schema_length=0,
+                ignore_errors=True,
+                encoding="utf8-lossy",
+            )
+
+            df = df.rename({name: f"col{i}" for i, name in enumerate(df.columns)})
+
+            # Garantir ao menos 11 colunas
+            for i in range(11):
+                col_name = f"col{i}"
+                if col_name not in df.columns:
+                    df = df.with_columns(pl.lit("").alias(col_name))
+
+            def clean_col(name: str) -> pl.Expr:
+                return (
+                    pl.col(name)
+                    .cast(pl.Utf8)
+                    .fill_null("")
+                    .str.replace("\x00", "")
+                    .str.strip_chars()
+                )
+
+            default_date = date(1970, 1, 1)
+
+            def parse_date(name: str) -> pl.Expr:
+                base = pl.col(name).cast(pl.Utf8).str.strip_chars()
+                d1 = base.str.strptime(pl.Date, "%Y-%m-%d", strict=False)
+                d2 = base.str.strptime(pl.Date, "%Y%m%d", strict=False)
+                return pl.coalesce(d1, d2, pl.lit(default_date))
+
+            df = df.with_columns([
+                pl.col("col0")
+                    .map_elements(lambda x: normalizar_codigo(x, 8) or "", return_dtype=pl.Utf8)
+                    .alias("cnpj_basico"),
+                pl.col("col1")
+                    .map_elements(lambda x: normalizar_codigo(x, 1) or "", return_dtype=pl.Utf8)
+                    .alias("identificador_socio"),
+                clean_col("col2")
+                    .map_elements(lambda x: limpar_string(x) or "", return_dtype=pl.Utf8)
+                    .alias("nome_socio"),
+                clean_col("col3")
+                    .map_elements(lambda x: limpar_string(x) or "", return_dtype=pl.Utf8)
+                    .alias("cnpj_cpf_socio"),
+                pl.col("col4")
+                    .map_elements(lambda x: normalizar_codigo(x, 2) or "", return_dtype=pl.Utf8)
+                    .alias("qualificacao_socio"),
+                parse_date("col5").alias("data_entrada_sociedade"),
+                pl.col("col6")
+                    .map_elements(lambda x: normalizar_codigo(x, 3) or "", return_dtype=pl.Utf8)
+                    .alias("pais"),
+                pl.col("col7")
+                    .map_elements(lambda x: normalizar_codigo(x, 1) or "", return_dtype=pl.Utf8)
+                    .alias("representante_legal"),
+                clean_col("col8")
+                    .map_elements(lambda x: limpar_string(x) or "", return_dtype=pl.Utf8)
+                    .alias("nome_representante"),
+                pl.col("col9")
+                    .map_elements(lambda x: normalizar_codigo(x, 2) or "", return_dtype=pl.Utf8)
+                    .alias("qualificacao_representante"),
+                pl.col("col10")
+                    .map_elements(lambda x: normalizar_codigo(x, 1) or "", return_dtype=pl.Utf8)
+                    .alias("faixa_etaria"),
+            ])
+
+            colunas_ordem = [
+                "cnpj_basico",
+                "identificador_socio",
+                "nome_socio",
+                "cnpj_cpf_socio",
+                "qualificacao_socio",
+                "data_entrada_sociedade",
+                "pais",
+                "representante_legal",
+                "nome_representante",
+                "qualificacao_representante",
+                "faixa_etaria",
+            ]
+
+            if df.height > 0:
+                tabela_df = df.select(colunas_ordem)
+                BATCH_SIZE = 500_000
+
+                for offset in range(0, tabela_df.height, BATCH_SIZE):
+                    chunk = tabela_df.slice(offset, BATCH_SIZE)
+                    batch = chunk.to_numpy().tolist()
+                    if not batch:
+                        continue
+                    self.client.execute("INSERT INTO socios VALUES", batch)
+                    linhas_processadas += len(batch)
+                    logger.info(f"  Inseridas {linhas_processadas:,} linhas de sócios até agora...")
         
         except Exception as e:
             logger.error(f"Erro ao importar {arquivo.name}: {e}")
@@ -256,58 +418,78 @@ class ClickHouseImporter:
         return linhas_processadas
     
     def importar_simples(self, arquivo: Path) -> int:
-        """Importa arquivo completo de simples de uma vez"""
+        """Importa arquivo completo de simples de uma vez (Polars vetorizado, sem iter_rows)"""
         logger.info(f"Importando simples de {arquivo.name}...")
         
         linhas_processadas = 0
-        dados = []
         
         try:
-            with open(arquivo, 'r', encoding='utf-8', errors='replace', newline='') as f:
-                reader = csv.reader(f, delimiter=';', quotechar='"')
-                
-                for linha_num, row in enumerate(reader, start=1):
-                    if len(row) < 7:
-                        while len(row) < 7:
-                            row.append('')
-                    
-                    # Normalizar datas para objetos date
-                    opcao_simples_raw = normalizar_data(row[2]) if len(row) > 2 else None
-                    data_opcao_simples = self._normalize_date(opcao_simples_raw)
-                    
-                    data_exclusao_simples_raw = normalizar_data(row[3]) if len(row) > 3 else None
-                    data_exclusao_simples = self._normalize_date(data_exclusao_simples_raw)
-                    
-                    data_opcao_mei_raw = normalizar_data(row[5]) if len(row) > 5 else None
-                    data_opcao_mei = self._normalize_date(data_opcao_mei_raw)
-                    
-                    data_exclusao_mei_raw = normalizar_data(row[6]) if len(row) > 6 else None
-                    data_exclusao_mei = self._normalize_date(data_exclusao_mei_raw)
-                    
-                    dados.append([
-                        normalizar_codigo(row[0], 8) or '',
-                        normalizar_codigo(row[1], 1) or '',
-                        data_opcao_simples,  # opcao_simples (objeto date)
-                        data_exclusao_simples,  # data_exclusao_simples (objeto date)
-                        normalizar_codigo(row[4], 1) or '',
-                        data_opcao_mei,  # opcao_mei (objeto date)
-                        data_exclusao_mei  # data_exclusao_mei (objeto date)
-                    ])
-                    
-                    # Log de progresso a cada 100k linhas
-                    if len(dados) % 100_000 == 0:
-                        logger.info(f"  Lidas {len(dados):,} linhas...")
-            
-            # Inserir tudo de uma vez
-            if dados:
-                logger.info(f"  Inserindo {len(dados):,} registros no banco...")
-                try:
-                    self.client.execute("INSERT INTO simples VALUES", dados)
-                    linhas_processadas = len(dados)
-                    logger.info(f"✓ Importados {linhas_processadas:,} registros de simples de {arquivo.name}")
-                except Exception as e:
-                    logger.error(f"✗ Erro ao inserir simples: {e}")
-                    raise
+            df = pl.read_csv(
+                arquivo,
+                separator=';',
+                has_header=False,
+                infer_schema_length=0,
+                ignore_errors=True,
+                encoding="utf8-lossy",
+            )
+
+            # Renomear colunas para padrão col0, col1, ...
+            df = df.rename({name: f"col{i}" for i, name in enumerate(df.columns)})
+
+            # Garantir pelo menos 7 colunas
+            for i in range(7):
+                col_name = f"col{i}"
+                if col_name not in df.columns:
+                    df = df.with_columns(pl.lit("").alias(col_name))
+
+            default_date = date(1970, 1, 1)
+
+            def parse_date(name: str) -> pl.Expr:
+                base = pl.col(name).cast(pl.Utf8).str.strip_chars()
+                d1 = base.str.strptime(pl.Date, "%Y-%m-%d", strict=False)
+                d2 = base.str.strptime(pl.Date, "%Y%m%d", strict=False)
+                return pl.coalesce(d1, d2, pl.lit(default_date))
+
+            # Normalizações vetorizadas
+            df = df.with_columns([
+                pl.col("col0")
+                    .map_elements(lambda x: normalizar_codigo(x, 8) or "", return_dtype=pl.Utf8)
+                    .alias("cnpj_basico"),
+                pl.col("col1")
+                    .map_elements(lambda x: normalizar_codigo(x, 1) or "", return_dtype=pl.Utf8)
+                    .alias("opcao_simples"),
+                parse_date("col2").alias("data_opcao_simples"),
+                parse_date("col3").alias("data_exclusao_simples"),
+                pl.col("col4")
+                    .map_elements(lambda x: normalizar_codigo(x, 1) or "", return_dtype=pl.Utf8)
+                    .alias("opcao_mei"),
+                parse_date("col5").alias("data_opcao_mei"),
+                parse_date("col6").alias("data_exclusao_mei"),
+            ])
+
+            colunas_ordem = [
+                "cnpj_basico",
+                "opcao_simples",
+                "data_opcao_simples",
+                "data_exclusao_simples",
+                "opcao_mei",
+                "data_opcao_mei",
+                "data_exclusao_mei",
+            ]
+
+            if df.height > 0:
+                # Inserir em chunks de 500k linhas usando operações vetorizadas
+                tabela_df = df.select(colunas_ordem)
+                BATCH_SIZE = 500_000
+
+                for offset in range(0, tabela_df.height, BATCH_SIZE):
+                    chunk = tabela_df.slice(offset, BATCH_SIZE)
+                    batch = chunk.to_numpy().tolist()
+                    if not batch:
+                        continue
+                    self.client.execute("INSERT INTO simples VALUES", batch)
+                    linhas_processadas += len(batch)
+                    logger.info(f"  Inseridas {linhas_processadas:,} linhas de simples até agora...")
         
         except Exception as e:
             logger.error(f"Erro ao importar {arquivo.name}: {e}")
@@ -333,18 +515,25 @@ class ClickHouseImporter:
         }.get(tabela, 4)
         
         try:
-            with open(arquivo, 'r', encoding='utf-8', errors='replace', newline='') as f:
-                reader = csv.reader(f, delimiter=';', quotechar='"')
+            df = pl.read_csv(
+                arquivo,
+                separator=';',
+                has_header=False,
+                infer_schema_length=0,
+                ignore_errors=True,
+                encoding="utf8-lossy",
+            )
+
+            for linha_num, row in enumerate(df.iter_rows(), start=1):
+                row = list(row)
+
+                if len(row) < 2:
+                    row.extend([''] * (2 - len(row)))
                 
-                for linha_num, row in enumerate(reader, start=1):
-                    if len(row) < 2:
-                        while len(row) < 2:
-                            row.append('')
-                    
-                    dados.append([
-                        normalizar_codigo(row[0], codigo_size) or '',
-                        limpar_string(row[1]) or ''
-                    ])
+                dados.append([
+                    normalizar_codigo(row[0], codigo_size) or '',
+                    limpar_string(row[1]) or ''
+                ])
             
             # Inserir tudo de uma vez
             if dados:
