@@ -103,76 +103,123 @@ GET /companies/cnpj/12.345.678/0001-99
 Authorization: Bearer <access_token>
 ```
 
-**Resposta (200) – Esquema resumido**
+**Resposta (200) – Estrutura completa**
 
 ```json
 {
   "estabelecimento": {
-    "cnpj": "12345678000199",
-    "cnpj_basico": "12345678",
-    "cnpj_ordem": "0001",
-    "cnpj_dv": "99",
-    "matriz_filial": "1",
-    "nome_fantasia": "EMPRESA EXEMPLO LTDA",
-    "situacao_cadastral": "2",
-    "data_situacao": "01/01/2020",
-    "motivo_situacao": "00",
-    "cidade_exterior": null,
-    "pais": "105",
-    "data_inicio": "01/01/2020",
-    "cnae_fiscal": "6201501",
-    "cnae_fiscal_secundaria": "6202300,6203100",
-    "tipo_logradouro": "RUA",
-    "logradouro": "EXEMPLO",
-    "numero": "123",
-    "complemento": "SALA 10",
-    "bairro": "CENTRO",
-    "cep": "01234567",
-    "uf": "SP",
-    "municipio": "3550308",
-    "ddd_1": "11",
-    "telefone_1": "12345678",
-    "ddd_2": null,
-    "telefone_2": null,
-    "ddd_fax": null,
-    "fax": null,
-    "email": "contato@exemplo.com.br",
-    "situacao_especial": null,
-    "data_situacao_especial": null
+    "identificacao": {
+      "cnpj": "12345678000199",
+      "matriz_filial": "1",
+      "nome_fantasia": "EMPRESA EXEMPLO LTDA"
+    },
+    "situacao": {
+      "situacao_cadastral": "2",
+      "situacao_motivo_desc": "SEM MOTIVO",
+      "data_situacao": "01/01/2020",
+      "data_abertura": "01/01/2020",
+      "situacao_especial": null,
+      "data_situacao_especial": null
+    },
+    "cnae": {
+      "principal": {
+        "codigo": "6201501",
+        "descricao": "Desenvolvimento de programas de computador sob encomenda"
+      },
+      "secundarios": [
+        {
+          "codigo": "6202300",
+          "descricao": "Desenvolvimento e licenciamento de programas customizáveis"
+        }
+      ]
+    },
+    "endereco": {
+      "tipo_logradouro": "RUA",
+      "logradouro": "EXEMPLO",
+      "numero": "123",
+      "complemento": "SALA 10",
+      "bairro": "CENTRO",
+      "cep": "01234567",
+      "uf": "SP",
+      "municipio": "3550308",
+      "municipio_desc": "SAO PAULO",
+      "cidade_exterior": null,
+      "pais": "105",
+      "pais_desc": "BRASIL"
+    },
+    "contato": {
+      "ddd_1": "11",
+      "telefone_1": "12345678",
+      "ddd_2": null,
+      "telefone_2": null,
+      "ddd_fax": null,
+      "fax": null,
+      "email": "contato@exemplo.com.br"
+    }
   },
   "empresa": {
-    "cnpj_basico": "12345678",
-    "razao_social": "EMPRESA EXEMPLO LTDA",
-    "natureza_juridica": "2062",
-    "qualificacao_do_responsavel": "05",
-    "capital_social": 100000.0,
-    "porte": "03",
-    "ente_federativo": null
-  },
-  "simples": {
-    "opcao_simples": "S",
-    "data_opcao_simples": "01/01/2020",
-    "data_exclusao_simples": null,
-    "opcao_mei": "N",
-    "data_opcao_mei": null,
-    "data_exclusao_mei": null
-  },
-  "socios": [
-    {
-      "identificador_socio": "1",
-      "nome_socio": "JOAO SILVA",
-      "cnpj_cpf_socio": "12345678901",
-      "qualificacao_socio": "05",
-      "data_entrada_sociedade": "01/01/2020",
-      "pais": "105",
-      "representante_legal": "N",
-      "nome_representante": null,
-      "qualificacao_representante": null,
-      "faixa_etaria": "5"
-    }
-  ],
-  "cnae_principal_desc": "Desenvolvimento de programas de computador sob encomenda",
-  "municipio_desc": "SAO PAULO"
+    "identificacao": {
+      "razao_social": "EMPRESA EXEMPLO LTDA"
+    },
+    "natureza_juridica": {
+      "codigo": "2062",
+      "descricao": "Sociedade Empresária Limitada"
+    },
+    "qualificacao": {
+      "codigo": "05",
+      "descricao": "Administrador"
+    },
+    "capital": {
+      "capital_social": 100000.0
+    },
+    "porte": {
+      "codigo": "03",
+      "descricao": "Empresa de pequeno porte"
+    },
+    "ente_federativo": null,
+    "simples": {
+      "simples": {
+        "opcao_simples": "S",
+        "data_opcao_simples": "01/01/2020",
+        "data_exclusao_simples": null
+      },
+      "mei": {
+        "opcao_mei": "N",
+        "data_opcao_mei": null,
+        "data_exclusao_mei": null
+      }
+    },
+    "socios": [
+      {
+        "identificacao": {
+          "identificador_socio": "1",
+          "nome_socio": "JOAO SILVA",
+          "cnpj_cpf_socio": "***456789**"
+        },
+        "faixa_etaria": {
+          "codigo": "5",
+          "descricao": "Entre 41 a 50 anos"
+        },
+        "data_entrada_sociedade": "01/01/2020",
+        "qualificacao_socio": {
+          "codigo": "05",
+          "descricao": "Administrador"
+        },
+        "pais": {
+          "codigo": "105",
+          "descricao": "BRASIL"
+        },
+        "representante_legal": {
+          "representante_legal": "N",
+          "nome_representante": null,
+          "qualificacao_representante": {
+            "codigo": "00",
+            "descricao": "Não informada"
+          }
+        }
+      }
+    ]
+  }
 }
 ```
 

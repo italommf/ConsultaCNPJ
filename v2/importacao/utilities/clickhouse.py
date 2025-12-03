@@ -86,12 +86,6 @@ def criar_banco_e_schema(client: Client, schema_file: Path) -> bool:
 
     logger.info("Criando banco de dados e schema (%s)...", schema_file.name)
     try:
-        # Habilitar LowCardinality (necessário para esta versão do ClickHouse)
-        # try:
-        #     client.execute("SET allow_experimental_low_cardinality_type = 1")
-        #     logger.debug("LowCardinality habilitado")
-        # except Exception:
-        #     logger.warning("Não foi possível habilitar LowCardinality (pode não ser necessário)")
         
         with open(schema_file, "r", encoding="utf-8") as file:
             schema_sql = file.read()

@@ -85,14 +85,25 @@ def contar_linhas_csv(arquivo: Path, num_colunas_esperadas: int, delimiter: str 
 
     # Tentar caminho rápido com Polars (vetorizado e em C)
     try:
-        df = pl.read_csv(
-            arquivo,
-            separator=delimiter,
-            has_header=False,
-            infer_schema_length=0,
-            ignore_errors=True,
-            encoding="utf8-lossy",
-        )
+        # Tentar UTF-8 primeiro, depois latin-1 para preservar acentos
+        try:
+            df = pl.read_csv(
+                arquivo,
+                separator=delimiter,
+                has_header=False,
+                infer_schema_length=0,
+                ignore_errors=True,
+                encoding="utf-8",
+            )
+        except Exception:
+            df = pl.read_csv(
+                arquivo,
+                separator=delimiter,
+                has_header=False,
+                infer_schema_length=0,
+                ignore_errors=True,
+                encoding="latin-1",
+            )
 
         cols = df.columns
         if not cols:
@@ -121,24 +132,39 @@ def contar_linhas_csv(arquivo: Path, num_colunas_esperadas: int, delimiter: str 
     linhas_problematicas = 0
 
     try:
-        with open(arquivo, 'r', encoding='utf-8', errors='replace', newline='') as f:
-            reader = csv.reader(f, delimiter=delimiter, quotechar='"')
-
-            for linha_num, row in enumerate(reader, start=1):
-                # Linha vazia
-                if not row or (len(row) == 1 and not row[0].strip()):
-                    continue
-
-                # Verificar número de colunas
-                num_colunas = len(row)
-
-                # Linha válida: tem exatamente o número esperado ou até 10% a mais
-                if num_colunas == num_colunas_esperadas or (num_colunas_esperadas < num_colunas <= max_colunas):
-                    linhas_validas += 1
-                # Linha problemática: tem menos colunas que o esperado (quebra de linha ou dados incompletos)
-                elif num_colunas < num_colunas_esperadas:
-                    linhas_problematicas += 1
-                # Linha com muitas colunas extras também é problemática
+        # Tentar UTF-8 primeiro, depois latin-1 para preservar acentos
+        try:
+            with open(arquivo, 'r', encoding='utf-8', errors='strict', newline='') as f:
+                reader = csv.reader(f, delimiter=delimiter, quotechar='"')
+                for linha_num, row in enumerate(reader, start=1):
+                    # Linha vazia
+                    if not row or (len(row) == 1 and not row[0].strip()):
+                        continue
+                    # Verificar número de colunas
+                    num_colunas = len(row)
+                    # Linha válida: tem exatamente o número esperado ou até 10% a mais
+                    if num_colunas == num_colunas_esperadas or (num_colunas_esperadas < num_colunas <= max_colunas):
+                        linhas_validas += 1
+                    # Linha problemática: tem menos colunas que o esperado
+                    else:
+                        linhas_problematicas += 1
+        except UnicodeDecodeError:
+            # Se UTF-8 falhar, tentar latin-1
+            with open(arquivo, 'r', encoding='latin-1', errors='strict', newline='') as f:
+                reader = csv.reader(f, delimiter=delimiter, quotechar='"')
+                for linha_num, row in enumerate(reader, start=1):
+                    # Linha vazia
+                    if not row or (len(row) == 1 and not row[0].strip()):
+                        continue
+                    # Verificar número de colunas
+                    num_colunas = len(row)
+                    # Linha válida: tem exatamente o número esperado ou até 10% a mais
+                    if num_colunas == num_colunas_esperadas or (num_colunas_esperadas < num_colunas <= max_colunas):
+                        linhas_validas += 1
+                    # Linha problemática: tem menos colunas que o esperado (quebra de linha ou dados incompletos)
+                    elif num_colunas < num_colunas_esperadas:
+                        linhas_problematicas += 1
+                    # Linha com muitas colunas extras também é problemática
                 else:
                     linhas_problematicas += 1
 

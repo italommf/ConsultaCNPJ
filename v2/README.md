@@ -216,8 +216,9 @@ curl -H "Authorization: Bearer TOKEN" \
 
 ### Erro de importação
 - Verificar se os arquivos CSV estão em `v2/importacao/data/` nas pastas corretas (`empresas`, `estabelecimentos`, `socios`, `simples`, `dominio`)
-- Verificar encoding dos arquivos (import usamos `encoding="utf8-lossy"` para tratar caracteres inválidos)
-- Verificar logs do script `v2/importacao/main.py`
+- Verificar encoding dos arquivos (os scripts tentam UTF-8 primeiro, depois latin-1 para preservar acentos)
+- Verificar logs do script `v2/importacao/process.py`
+- Para verificar encoding e acentos: `python v2/importacao/verificar_encoding.py`
 
 ### Erro de autenticação
 - Verificar se o token está sendo enviado no header `Authorization: Bearer <token>`

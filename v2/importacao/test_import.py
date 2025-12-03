@@ -8,7 +8,7 @@ c = Client(host='localhost', port=9000, user='default', database='cnpj')
 imp = ClickHouseImporter(c, batch_size=100)
 
 # Encontrar arquivo de teste
-arquivos = list(Path('data/estabelecimentos').glob('*.ESTABELE*'))
+arquivos = list(Path('../data/estabelecimentos').glob('*.ESTABELE*'))
 if arquivos:
     print(f"Testando importação de {arquivos[0].name}...")
     try:

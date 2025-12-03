@@ -1,13 +1,18 @@
 """Processo principal de importação - orquestra todas as etapas"""
-import logging
 import sys
 import time
-from datetime import datetime
+import logging
 from pathlib import Path
+from datetime import datetime
+from functions.import_csv import ClickHouseImporter
 
 from dotenv import load_dotenv
-
-from functions.import_csv import ClickHouseImporter
+from utilities.output import (
+    imprimir_estatisticas_finais,
+    imprimir_resumo_contagens,
+    print_header,
+    print_step,
+)
 from utilities.clickhouse import (
     carregar_config,
     configurar_sessao_clickhouse,
@@ -16,16 +21,10 @@ from utilities.clickhouse import (
     limpar_banco_dados,
     verificar_importacao,
 )
-from utilities.config import garantir_encoding_windows, resolver_diretorios
 from utilities.csv_stats import contar_linhas_arquivos
-from utilities.downloader import baixar_arquivos_mes_atual, descompactar_arquivos
-from utilities.output import (
-    imprimir_estatisticas_finais,
-    imprimir_resumo_contagens,
-    print_header,
-    print_step,
-)
 from utilities.utils import encontrar_arquivos_csv, validar_arquivo
+from utilities.config import garantir_encoding_windows, resolver_diretorios
+from utilities.downloader import baixar_arquivos_mes_atual, descompactar_arquivos
 
 logging.basicConfig(level=logging.INFO, format="%(message)s")
 logger = logging.getLogger(__name__)
@@ -33,14 +32,14 @@ logger = logging.getLogger(__name__)
 BASE_DIR = Path(__file__).parent
 
 def executar():
-    """Executa todas as etapas do processo de importação"""
-    load_dotenv()
-    garantir_encoding_windows()
 
+    inicio = time.time()
     data_dir, downloads_dir = resolver_diretorios(BASE_DIR)
     schema_file = BASE_DIR.parent / "clickhouse" / "schema.sql"
 
-    inicio = time.time()
+    load_dotenv()
+    garantir_encoding_windows()
+
     print_header("PROCESSAMENTO COMPLETO DE DADOS CNPJ - CLICKHOUSE OTIMIZADO")
     print(f"Data/Hora: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     print(f"Sistema: {sys.platform}")

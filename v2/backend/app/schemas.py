@@ -115,29 +115,166 @@ class Simples(SimplesBase):
 
 
 # =================================================================================
-# Schema de Resposta Completa (Empresa + Estabelecimento + Sócios + Simples)
+# Schemas para estrutura compatível com v1
 # =================================================================================
-class CompanyDetailResponse(BaseModel):
-    # Dados do Estabelecimento
-    estabelecimento: Estabelecimento
-    
-    # Dados da Empresa
-    empresa: Optional[Empresa] = None
-    
-    # Simples Nacional
-    simples: Optional[Simples] = None
-    
-    # Lista de Sócios
-    socios: List[Socio] = []
-    
-    # Dados de domínio (descritivos)
-    cnae_principal_desc: Optional[str] = None
-    municipio_desc: Optional[str] = None
+class IdentificacaoEstabelecimento(BaseModel):
+    cnpj: Optional[str] = None
+    matriz_filial: Optional[str] = None
+    nome_fantasia: Optional[str] = None
+
+
+class SituacaoEstabelecimento(BaseModel):
+    situacao_cadastral: Optional[str] = None
     situacao_motivo_desc: Optional[str] = None
-    natureza_juridica_desc: Optional[str] = None
-    pais_estabelecimento_desc: Optional[str] = None
-    qualif_resp_empresa_desc: Optional[str] = None
-    porte_desc: Optional[str] = None
+    data_situacao: Optional[str] = None
+    data_abertura: Optional[str] = None
+    situacao_especial: Optional[str] = None
+    data_situacao_especial: Optional[str] = None
+
+
+class CnaePrincipal(BaseModel):
+    codigo: Optional[str] = None
+    descricao: Optional[str] = None
+
+
+class CnaeSecundario(BaseModel):
+    codigo: Optional[str] = None
+    descricao: Optional[str] = None
+
+
+class CnaeInfo(BaseModel):
+    principal: Optional[CnaePrincipal] = None
+    secundarios: List[CnaeSecundario] = []
+
+
+class EnderecoEstabelecimento(BaseModel):
+    tipo_logradouro: Optional[str] = None
+    logradouro: Optional[str] = None
+    numero: Optional[str] = None
+    complemento: Optional[str] = None
+    bairro: Optional[str] = None
+    cep: Optional[str] = None
+    uf: Optional[str] = None
+    municipio: Optional[str] = None
+    municipio_desc: Optional[str] = None
+    cidade_exterior: Optional[str] = None
+    pais: Optional[str] = None
+    pais_desc: Optional[str] = None
+
+
+class ContatoEstabelecimento(BaseModel):
+    ddd_1: Optional[str] = None
+    telefone_1: Optional[str] = None
+    ddd_2: Optional[str] = None
+    telefone_2: Optional[str] = None
+    ddd_fax: Optional[str] = None
+    fax: Optional[str] = None
+    email: Optional[str] = None
+
+
+class EstabelecimentoV1(BaseModel):
+    identificacao: IdentificacaoEstabelecimento
+    situacao: SituacaoEstabelecimento
+    cnae: CnaeInfo
+    endereco: EnderecoEstabelecimento
+    contato: ContatoEstabelecimento
+
+
+class IdentificacaoEmpresa(BaseModel):
+    razao_social: Optional[str] = None
+
+
+class NaturezaJuridica(BaseModel):
+    codigo: Optional[str] = None
+    descricao: Optional[str] = None
+
+
+class Qualificacao(BaseModel):
+    codigo: Optional[str] = None
+    descricao: Optional[str] = None
+
+
+class Capital(BaseModel):
+    capital_social: Optional[float] = None
+
+
+class Porte(BaseModel):
+    codigo: Optional[str] = None
+    descricao: Optional[str] = None
+
+
+class SimplesInfo(BaseModel):
+    opcao_simples: Optional[str] = None
+    data_opcao_simples: Optional[str] = None
+    data_exclusao_simples: Optional[str] = None
+
+
+class MeiInfo(BaseModel):
+    opcao_mei: Optional[str] = None
+    data_opcao_mei: Optional[str] = None
+    data_exclusao_mei: Optional[str] = None
+
+
+class SimplesNacional(BaseModel):
+    simples: Optional[SimplesInfo] = None
+    mei: Optional[MeiInfo] = None
+
+
+class IdentificacaoSocio(BaseModel):
+    identificador_socio: Optional[str] = None
+    nome_socio: Optional[str] = None
+    cnpj_cpf_socio: Optional[str] = None
+
+
+class FaixaEtaria(BaseModel):
+    codigo: Optional[str] = None
+    descricao: Optional[str] = None
+
+
+class QualificacaoSocio(BaseModel):
+    codigo: Optional[str] = None
+    descricao: Optional[str] = None
+
+
+class PaisSocio(BaseModel):
+    codigo: Optional[str] = None
+    descricao: Optional[str] = None
+
+
+class QualificacaoRepresentante(BaseModel):
+    codigo: Optional[str] = None
+    descricao: Optional[str] = None
+
+
+class RepresentanteLegal(BaseModel):
+    representante_legal: Optional[str] = None
+    nome_representante: Optional[str] = None
+    qualificacao_representante: Optional[QualificacaoRepresentante] = None
+
+
+class SocioV1(BaseModel):
+    identificacao: IdentificacaoSocio
+    faixa_etaria: FaixaEtaria
+    data_entrada_sociedade: Optional[str] = None
+    qualificacao_socio: QualificacaoSocio
+    pais: PaisSocio
+    representante_legal: RepresentanteLegal
+
+
+class EmpresaV1(BaseModel):
+    identificacao: IdentificacaoEmpresa
+    natureza_juridica: NaturezaJuridica
+    qualificacao: Qualificacao
+    capital: Capital
+    porte: Porte
+    ente_federativo: Optional[str] = None
+    simples: Optional[SimplesNacional] = None
+    socios: List[SocioV1] = []
+
+
+class CompanyDetailResponse(BaseModel):
+    estabelecimento: EstabelecimentoV1
+    empresa: EmpresaV1
 
 
 # =================================================================================
@@ -222,17 +359,4 @@ class PaisBase(BaseModel):
 class Pais(PaisBase):
     class Config:
         from_attributes = True
-
-
-class QualificacaoBase(BaseModel):
-    codigo: str
-    descricao: Optional[str] = None
-
-
-class Qualificacao(QualificacaoBase):
-    class Config:
-        from_attributes = True
-
-
-
 

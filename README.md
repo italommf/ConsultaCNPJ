@@ -18,9 +18,15 @@ Projeto para consulta e análise da base pública de CNPJ.
 ## Por onde começar?
 
 1. Leia `v2/README.md` para ver instalação, importação de dados e como subir a API nova.
-2. Depois de subir a API v2, acesse:
+2. Execute o script de importação em `v2/importacao/process.py` para importar os dados da Receita Federal.
+3. Depois de subir a API v2, acesse:
    - `http://localhost:8000/docs` (Swagger)
    - `http://localhost:8000/redoc` (Redoc)
-3. Para detalhes de cada endpoint, consulte `v2/API_DOCUMENTATION.md`.
+4. Para detalhes de cada endpoint, consulte `v2/API_DOCUMENTATION.md`.
+
+## Notas Importantes
+
+- **Encoding**: Os scripts de importação foram corrigidos para preservar acentos portugueses (tentam UTF-8 primeiro, depois latin-1).
+- **Verificação**: Use `v2/importacao/verificar_encoding.py` para verificar encoding e acentos nos dados antes e depois da importação.
 
 

@@ -7,6 +7,45 @@ from datetime import date
 import polars as pl
 from clickhouse_driver import Client
 
+
+def ler_csv_com_encoding(arquivo: Path, separator: str = ';', has_header: bool = False, 
+                         infer_schema_length: int = 0, ignore_errors: bool = True):
+    """
+    Lê CSV tentando diferentes encodings para preservar acentos.
+    Tenta UTF-8 primeiro, depois latin-1 (comum em arquivos brasileiros).
+    """
+    # Tentar UTF-8 primeiro (preserva acentos corretamente)
+    try:
+        return pl.read_csv(
+            arquivo,
+            separator=separator,
+            has_header=has_header,
+            infer_schema_length=infer_schema_length,
+            ignore_errors=ignore_errors,
+            encoding="utf-8",
+        )
+    except Exception:
+        # Se UTF-8 falhar, tentar latin-1 (preserva acentos brasileiros)
+        try:
+            return pl.read_csv(
+                arquivo,
+                separator=separator,
+                has_header=has_header,
+                infer_schema_length=infer_schema_length,
+                ignore_errors=ignore_errors,
+                encoding="latin-1",
+            )
+        except Exception:
+            # Último recurso: usar utf8-lossy apenas se ambos falharem
+            return pl.read_csv(
+                arquivo,
+                separator=separator,
+                has_header=has_header,
+                infer_schema_length=infer_schema_length,
+                ignore_errors=ignore_errors,
+                encoding="utf8-lossy",
+            )
+
 # Ajuste de path para suportar execução direta
 BASE_DIR = Path(__file__).resolve().parents[1]
 UTILS_DIR = BASE_DIR / "utilities"
@@ -78,14 +117,8 @@ class ClickHouseImporter:
         linhas_processadas = 0
         
         try:
-            df = pl.read_csv(
-                arquivo,
-                separator=';',
-                has_header=False,
-                infer_schema_length=0,
-                ignore_errors=True,
-                encoding="utf8-lossy",  # arquivos da Receita podem ter bytes inválidos
-            )
+            df = ler_csv_com_encoding(arquivo, separator=';', has_header=False, 
+                                     infer_schema_length=0, ignore_errors=True)
 
             # Renomear colunas para padrão col0, col1, ...
             df = df.rename({name: f"col{i}" for i, name in enumerate(df.columns)})
@@ -168,14 +201,8 @@ class ClickHouseImporter:
         dados = []
         
         try:
-            df = pl.read_csv(
-                arquivo,
-                separator=';',
-                has_header=False,
-                infer_schema_length=0,
-                ignore_errors=True,
-                encoding="utf8-lossy",
-            )
+            df = ler_csv_com_encoding(arquivo, separator=';', has_header=False, 
+                                     infer_schema_length=0, ignore_errors=True)
 
             # Renomear colunas para um padrão conhecido (col0, col1, ...)
             df = df.rename({name: f"col{i}" for i, name in enumerate(df.columns)})
@@ -316,14 +343,8 @@ class ClickHouseImporter:
         linhas_processadas = 0
         
         try:
-            df = pl.read_csv(
-                arquivo,
-                separator=';',
-                has_header=False,
-                infer_schema_length=0,
-                ignore_errors=True,
-                encoding="utf8-lossy",
-            )
+            df = ler_csv_com_encoding(arquivo, separator=';', has_header=False, 
+                                     infer_schema_length=0, ignore_errors=True)
 
             df = df.rename({name: f"col{i}" for i, name in enumerate(df.columns)})
 
@@ -424,14 +445,8 @@ class ClickHouseImporter:
         linhas_processadas = 0
         
         try:
-            df = pl.read_csv(
-                arquivo,
-                separator=';',
-                has_header=False,
-                infer_schema_length=0,
-                ignore_errors=True,
-                encoding="utf8-lossy",
-            )
+            df = ler_csv_com_encoding(arquivo, separator=';', has_header=False, 
+                                     infer_schema_length=0, ignore_errors=True)
 
             # Renomear colunas para padrão col0, col1, ...
             df = df.rename({name: f"col{i}" for i, name in enumerate(df.columns)})
@@ -515,14 +530,8 @@ class ClickHouseImporter:
         }.get(tabela, 4)
         
         try:
-            df = pl.read_csv(
-                arquivo,
-                separator=';',
-                has_header=False,
-                infer_schema_length=0,
-                ignore_errors=True,
-                encoding="utf8-lossy",
-            )
+            df = ler_csv_com_encoding(arquivo, separator=';', has_header=False, 
+                                     infer_schema_length=0, ignore_errors=True)
 
             for linha_num, row in enumerate(df.iter_rows(), start=1):
                 row = list(row)
@@ -541,9 +550,9 @@ class ClickHouseImporter:
                 try:
                     self.client.execute(f"INSERT INTO {tabela} VALUES", dados)
                     linhas_processadas = len(dados)
-                    logger.info(f"✓ Importados {linhas_processadas:,} registros de {tabela} de {arquivo.name}")
+                    logger.info(f"  ✓ Importados {linhas_processadas:,} registros de {tabela} de {arquivo.name}")
                 except Exception as e:
-                    logger.error(f"✗ Erro ao inserir {tabela}: {e}")
+                    logger.error(f"  ✗ Erro ao inserir {tabela}: {e}")
                     raise
         
         except Exception as e:
