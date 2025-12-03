@@ -215,7 +215,7 @@ curl -H "Authorization: Bearer TOKEN" \
 - Verificar logs: `sudo journalctl -u clickhouse-server` ou `docker logs clickhouse-cnpj`
 
 ### Erro de importação
-- Verificar se os arquivos CSV estão em `v2/data/` nas pastas corretas (`empresas`, `estabelecimentos`, `socios`, `simples`, `dominio`)
+- Verificar se os arquivos CSV estão em `v2/importacao/data/` nas pastas corretas (`empresas`, `estabelecimentos`, `socios`, `simples`, `dominio`)
 - Verificar encoding dos arquivos (import usamos `encoding="utf8-lossy"` para tratar caracteres inválidos)
 - Verificar logs do script `v2/importacao/main.py`
 

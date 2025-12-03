@@ -5,7 +5,6 @@ import time
 import zipfile
 import shutil
 import psycopg2
-import psycopg2.errors
 import concurrent.futures
 import getpass
 from pathlib import Path
@@ -13,55 +12,22 @@ import tempfile
 from psycopg2.extensions import ISOLATION_LEVEL_AUTOCOMMIT
 import requests
 from bs4 import BeautifulSoup
-from urllib.parse import urljoin, quote_plus
+from urllib.parse import urljoin
 from datetime import datetime
-from decouple import config
-
-# Garantir encoding UTF-8 para o ambiente
-if sys.platform == 'win32':
-    # Tentar configurar UTF-8 no Windows
-    try:
-        if hasattr(sys.stdout, 'reconfigure') and sys.stdout.encoding != 'utf-8':
-            sys.stdout.reconfigure(encoding='utf-8')
-        if hasattr(sys.stderr, 'reconfigure') and sys.stderr.encoding != 'utf-8':
-            sys.stderr.reconfigure(encoding='utf-8')
-    except:
-        pass
 
 # =================================================================================
 # CONFIGURAÇÕES GERAIS
 # =================================================================================
-# Usar python-decouple para ler variáveis de ambiente do arquivo .env
-# Isso resolve problemas de encoding e é mais seguro
-
-# Detectar sistema operacional e definir diretórios padrão
-def get_default_base_dir():
-    """Retorna o diretório base padrão baseado no sistema operacional."""
-    if sys.platform == 'win32':
-        # Windows: usar o diretório do projeto atual
-        # Assumindo que o script está em scripts/ e o projeto está um nível acima
-        script_dir = Path(__file__).parent.absolute()
-        project_dir = script_dir.parent
-        return str(project_dir)
-    else:
-        # Linux/Unix: usar o padrão da VPS
-        return "/var/www/cnpj_api"
-
-# BASE_DIR pode ser sobrescrito por variável de ambiente ou usa padrão baseado no SO
-BASE_DIR = Path(config('CNPJ_BASE_DIR', default=get_default_base_dir()))
+# BASE_DIR pode ser sobrescrito por variável de ambiente ou usa padrão
+# Padrão para VPS, mas pode ser sobrescrito por variável de ambiente
+BASE_DIR = Path(os.environ.get('CNPJ_BASE_DIR', "/var/www/cnpj_api"))
 DOWNLOADS_DIR = BASE_DIR / "downloads"
 DATA_DIR = BASE_DIR / "data"
 
-# Criar diretórios se não existirem
-DOWNLOADS_DIR.mkdir(parents=True, exist_ok=True)
-DATA_DIR.mkdir(parents=True, exist_ok=True)
-
-# Configurações do banco de dados usando decouple
-# Usar search_path para procurar .env na raiz do projeto também
-DB_HOST = config('DB_HOST', default='localhost')
-DB_PORT = config('DB_PORT', default='5432', cast=int)
-DB_USER = config('DB_USER', default='postgres')  # Mudado para postgres como padrão
-DB_NAME = config('DB_NAME', default='cnpjdb')
+DB_HOST = os.environ.get('DB_HOST', "localhost")
+DB_PORT = os.environ.get('DB_PORT', "5432")
+DB_USER = os.environ.get('DB_USER', "cnpj_user")
+DB_NAME = os.environ.get('DB_NAME', "cnpjdb")
 
 # Mapeamento de arquivos para tabelas e colunas
 # Nota: Usamos tipos TEXT para todas as colunas inicialmente para garantir a importação.
@@ -240,46 +206,13 @@ def criar_csv_temporario_normalizado(filepath, table_info):
 # =================================================================================
 def get_db_connection(password, dbname=None):
     """Cria uma conexão com o banco de dados."""
-    # Garantir que password seja string
-    if isinstance(password, bytes):
-        password = password.decode('utf-8', errors='replace')
-    password = str(password)
-    
-    # Usar valores do decouple (já são strings Unicode válidas)
-    user = str(DB_USER)
-    host = str(DB_HOST)
-    port = int(DB_PORT) if isinstance(DB_PORT, int) else int(DB_PORT)
-    db = str(dbname or DB_NAME)
-    
-    # Limpar variáveis de ambiente problemáticas antes de conectar
-    # O psycopg2 pode tentar ler o PATH que pode conter caracteres especiais
-    old_path = os.environ.get('PATH', '')
-    try:
-        # Temporariamente limpar PATH problemático (manter apenas o essencial)
-        # Isso evita que psycopg2 tente ler caminhos com caracteres especiais
-        clean_path = ';'.join([p for p in old_path.split(';') if p and not any(ord(c) > 127 for c in p)])
-        if clean_path:
-            os.environ['PATH'] = clean_path
-    except:
-        pass
-    
-    try:
-        # Conectar usando psycopg2
-        conn = psycopg2.connect(
-            user=user,
-            password=password,
-            host=host,
-            port=port,
-            dbname=db,
-            client_encoding='UTF8'
-        )
-        return conn
-    finally:
-        # Restaurar PATH original
-        try:
-            os.environ['PATH'] = old_path
-        except:
-            pass
+    return psycopg2.connect(
+        user=DB_USER,
+        password=password,
+        host=DB_HOST,
+        port=DB_PORT,
+        dbname=dbname or DB_NAME
+    )
 
 def criar_banco_se_nao_existir(password):
     """Cria o banco de dados 'cnpjdb' se ele não existir."""
@@ -305,72 +238,9 @@ def criar_banco_se_nao_existir(password):
         print(f"Erro crítico ao criar banco: {e}")
         sys.exit(1)
 
-def limpar_banco_dados(password):
-    """Remove todas as tabelas do banco de dados para permitir importação limpa."""
-    print("\n[LIMPEZA] Limpando Banco de Dados...")
-    print("  ⚠ ATENÇÃO: Todas as tabelas serão removidas!")
-    try:
-        conn = get_db_connection(password)
-        conn.set_isolation_level(ISOLATION_LEVEL_AUTOCOMMIT)
-        cur = conn.cursor()
-        
-        # Lista de todas as tabelas a serem removidas
-        tabelas = [
-            "estabelecimentos", "empresas", "socios", "simples",
-            "cnaes", "motivos", "municipios", "naturezas", "paises", "qualificacoes"
-        ]
-        
-        print(f"  Removendo {len(tabelas)} tabelas...")
-        for tabela in tabelas:
-            try:
-                cur.execute(f"DROP TABLE IF EXISTS {tabela} CASCADE;")
-                print(f"    ✓ Tabela '{tabela}' removida")
-            except Exception as e:
-                print(f"    ⚠ Erro ao remover '{tabela}': {e}")
-        
-        # Remover extensões se necessário (mas manter pg_trgm que será recriada)
-        # Não removemos pg_trgm pois será usada novamente
-        
-        # Verificar se há outras tabelas (Django, etc)
-        cur.execute("""
-            SELECT tablename 
-            FROM pg_tables 
-            WHERE schemaname = 'public' 
-            AND tablename NOT LIKE 'pg_%'
-            ORDER BY tablename;
-        """)
-        outras_tabelas = [row[0] for row in cur.fetchall()]
-        
-        if outras_tabelas:
-            print(f"\n  ⚠ Aviso: Encontradas {len(outras_tabelas)} outras tabelas no banco:")
-            for tab in outras_tabelas:
-                print(f"    - {tab}")
-            print("  (Tabelas do Django não foram removidas)")
-        
-        cur.close()
-        conn.close()
-        print("\n✓ Banco de dados limpo com sucesso!")
-        print("  Pronto para executar recriar_tabelas e importar dados.")
-        return True
-    except Exception as e:
-        print(f"✗ Erro ao limpar banco: {e}")
-        import traceback
-        traceback.print_exc()
-        return False
-
 def recriar_tabelas(password):
-    """Limpa (DROP) e recria todas as tabelas com schema OTIMIZADO desde o início.
-    
-    As tabelas são criadas com tipos otimizados:
-    - char(n) para campos de tamanho fixo (CNPJ, CEP, etc.)
-    - varchar(n) para campos de texto com limite
-    - date para campos de data
-    - numeric para valores monetários
-    - text apenas para campos que podem ser muito grandes
-    
-    Isso economiza espaço desde o início e melhora a performance.
-    """
-    print("\n[2/6] Recriando Tabelas com Schema Otimizado...")
+    """Limpa (DROP) e recria todas as tabelas com schema permissivo (TEXT)."""
+    print("\n[2/6] Recriando Tabelas (Schema Inicial)...")
     try:
         conn = get_db_connection(password)
         cur = conn.cursor()
@@ -397,7 +267,7 @@ def recriar_tabelas(password):
         
         cur.execute("""
             CREATE TABLE estabelecimentos (
-                cnpj_basico char(8) REFERENCES empresas(cnpj_basico),
+                cnpj_basico char(8),
                 cnpj_ordem char(4),
                 cnpj_dv char(2),
                 matriz_filial char(1),
@@ -430,21 +300,16 @@ def recriar_tabelas(password):
             );
         """)
         
-        # Coluna gerada CNPJ completo e PRIMARY KEY
+        # Coluna gerada CNPJ completo
         cur.execute("""
             ALTER TABLE estabelecimentos 
             ADD COLUMN cnpj char(14) 
             GENERATED ALWAYS AS (cnpj_basico || cnpj_ordem || cnpj_dv) STORED;
         """)
-        
-        cur.execute("""
-            ALTER TABLE estabelecimentos 
-            ADD PRIMARY KEY (cnpj);
-        """)
 
         cur.execute("""
             CREATE TABLE socios (
-                cnpj_basico char(8) REFERENCES empresas(cnpj_basico),
+                cnpj_basico char(8),
                 identificador_socio char(1),
                 nome_socio varchar(200),
                 cnpj_cpf_socio varchar(20),
@@ -460,7 +325,7 @@ def recriar_tabelas(password):
         
         cur.execute("""
             CREATE TABLE simples (
-                cnpj_basico char(8) PRIMARY KEY REFERENCES empresas(cnpj_basico),
+                cnpj_basico char(8) PRIMARY KEY,
                 opcao_simples char(1),
                 data_opcao_simples date,
                 data_exclusao_simples date,
@@ -478,18 +343,28 @@ def recriar_tabelas(password):
         cur.execute("CREATE TABLE paises (codigo char(3) PRIMARY KEY, descricao varchar(100));")
         cur.execute("CREATE TABLE qualificacoes (codigo char(2) PRIMARY KEY, descricao varchar(200));")
 
-        # Criar índices básicos imediatamente (antes da importação para melhor performance)
-        print("Criando índices básicos iniciais...")
-        try:
-            cur.execute("CREATE INDEX IF NOT EXISTS idx_estab_cnpj_basico_temp ON estabelecimentos (cnpj_basico);")
-            cur.execute("CREATE INDEX IF NOT EXISTS idx_socios_cnpj_basico_temp ON socios (cnpj_basico);")
-        except Exception as e:
-            print(f"  Aviso ao criar índices básicos: {e}")
-        
         conn.commit()
-        cur.close()
-        conn.close()
-        print("Tabelas recriadas com sucesso.")
+    # Criar índices básicos imediatamente (antes da importação para melhor performance)
+    print("Criando índices básicos...")
+    try:
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_estab_cnpj_basico_temp ON estabelecimentos (cnpj_basico);")
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_socios_cnpj_basico_temp ON socios (cnpj_basico);")
+    except Exception as e:
+        print(f"  Aviso ao criar índices básicos: {e}")
+    
+    conn.commit()
+    # Criar índices básicos imediatamente (antes da importação para melhor performance)
+    print("Criando índices básicos iniciais...")
+    try:
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_estab_cnpj_basico_temp ON estabelecimentos (cnpj_basico);")
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_socios_cnpj_basico_temp ON socios (cnpj_basico);")
+    except Exception as e:
+        print(f"  Aviso ao criar índices básicos: {e}")
+    
+    conn.commit()
+    cur.close()
+    conn.close()
+    print("Tabelas recriadas com sucesso.")
     except Exception as e:
         print(f"Erro ao recriar tabelas: {e}")
         sys.exit(1)
@@ -607,218 +482,6 @@ def descompactar_arquivos():
     
     print(f"Descompactação concluída. {sum(results)} arquivos processados.")
 
-def importar_arquivo_individual_linha_por_linha(password, filepath, table_info, conn, cur, date_cols_in_db=None, column_info=None):
-    """Fallback: Importa arquivo linha por linha quando COPY falha devido a linhas malformadas."""
-    table_name = table_info["table"]
-    columns = table_info["columns"]
-    cols_str = ", ".join(columns)
-    num_cols = len(columns)
-    
-    print(f"    ⚠ Usando importação linha por linha (arquivo contém linhas malformadas)")
-    
-    # Construir SQL de inserção com conversões de tipo
-    insert_cols = []
-    for col in columns:
-        col_expr = "%s"
-        
-        # Se for coluna de data, converter
-        if date_cols_in_db and col in date_cols_in_db and date_cols_in_db[col] == 'date':
-            col_expr = f"""
-                CASE 
-                    WHEN %s IS NULL OR TRIM(%s::text) = '' THEN NULL
-                    WHEN %s::text ~ '^\\d{{2}}/\\d{{2}}/\\d{{4}}$' THEN 
-                        TO_DATE(%s::text, 'DD/MM/YYYY')
-                    ELSE NULL
-                END
-            """
-            # Para CASE, precisamos passar o valor 4 vezes
-            # Mas isso não funciona com executemany, então vamos usar uma abordagem diferente
-            col_expr = f"TO_DATE(NULLIF(TRIM(%s::text), ''), 'DD/MM/YYYY')"
-        # Se for coluna char(n) ou varchar(n), truncar
-        elif column_info and col in column_info:
-            data_type, max_length = column_info[col]
-            if data_type == 'character' and max_length is not None:
-                col_expr = f"SUBSTRING(TRIM(COALESCE(%s::text, '')) FROM 1 FOR {max_length})"
-            elif data_type == 'character varying' and max_length is not None:
-                col_expr = f"SUBSTRING(TRIM(COALESCE(%s::text, '')) FROM 1 FOR {max_length})"
-            else:
-                col_expr = "NULLIF(TRIM(%s::text), '')"
-        else:
-            col_expr = "NULLIF(TRIM(%s::text), '')"
-        
-        insert_cols.append(col_expr)
-    
-    # Construir SQL final
-    insert_cols_str = ", ".join([f"{expr} AS {col}" for expr, col in zip(insert_cols, columns)])
-    insert_sql = f"INSERT INTO {table_name} ({cols_str}) SELECT {insert_cols_str}"
-    
-    # Para executar, precisamos passar os valores múltiplas vezes para cada CASE
-    # Vamos simplificar: usar uma função que constrói o SQL dinamicamente
-    # Na verdade, é melhor usar uma abordagem mais simples com executemany direto
-    
-    # Abordagem simplificada: inserir com valores diretos e deixar PostgreSQL converter
-    placeholders = ", ".join(["%s"] * num_cols)
-    insert_sql_simple = f"INSERT INTO {table_name} ({cols_str}) VALUES ({placeholders})"
-    
-    linhas_processadas = 0
-    linhas_ignoradas = 0
-    batch_size = 1000
-    batch = []
-    
-    date_columns_map = {
-        "estabelecimentos": ["data_situacao", "data_inicio", "data_situacao_especial"],
-        "socios": ["data_entrada_sociedade"],
-        "simples": ["data_opcao_simples", "data_exclusao_simples", "data_opcao_mei", "data_exclusao_mei"]
-    }
-    date_cols = date_columns_map.get(table_name, [])
-    
-    with open(filepath, 'r', encoding='utf-8', errors='replace') as f:
-        reader = csv.reader(f, delimiter=';', quotechar='"')
-        
-        for linha_num, row in enumerate(reader, start=1):
-            # Normalizar número de colunas: preencher com vazios se faltar, truncar se sobrar
-            while len(row) < num_cols:
-                row.append('')
-            if len(row) > num_cols:
-                row = row[:num_cols]
-            
-            # Processar valores: normalizar datas e validar tamanhos
-            valores = []
-            for idx, col in enumerate(columns):
-                valor = row[idx] if idx < len(row) else ''
-                
-                # Limpar valor
-                if valor:
-                    valor = valor.strip()
-                else:
-                    valor = ''
-                
-                # Para datas, garantir formato DD/MM/YYYY (já deve estar normalizado pelo criar_csv_temporario_normalizado)
-                if date_cols_in_db and col in date_cols_in_db and date_cols_in_db[col] == 'date':
-                    if valor and valor != '':
-                        # Se já está no formato DD/MM/YYYY, manter
-                        if valor.count('/') == 2:
-                            try:
-                                parts = valor.split('/')
-                                if len(parts) == 3 and len(parts[0]) == 2 and len(parts[1]) == 2 and len(parts[2]) == 4:
-                                    valores.append(valor)
-                                else:
-                                    valores.append(None)
-                            except:
-                                valores.append(None)
-                        else:
-                            valores.append(None)
-                    else:
-                        valores.append(None)
-                else:
-                    # Validar tamanho se necessário
-                    if column_info and col in column_info:
-                        data_type, max_length = column_info[col]
-                        if max_length and len(valor) > max_length:
-                            valor = valor[:max_length]
-                    
-                    valores.append(valor if valor else None)
-            
-            batch.append(tuple(valores))
-            
-            # Inserir em lotes usando uma tabela temporária para conversões
-            if len(batch) >= batch_size:
-                try:
-                    # Criar tabela temporária
-                    temp_table = f"{table_name}_temp_batch"
-                    temp_cols_def = ", ".join([f"{col} text" for col in columns])
-                    cur.execute(f"CREATE TEMP TABLE {temp_table} ({temp_cols_def});")
-                    
-                    # Inserir batch na temp
-                    temp_placeholders = ", ".join(["%s"] * num_cols)
-                    cur.executemany(f"INSERT INTO {temp_table} ({cols_str}) VALUES ({temp_placeholders})", batch)
-                    
-                    # Converter e inserir na tabela final
-                    insert_cols_final = []
-                    for col in columns:
-                        col_expr = f"{temp_table}.{col}"
-                        
-                        if date_cols_in_db and col in date_cols_in_db and date_cols_in_db[col] == 'date':
-                            col_expr = f"""
-                                CASE 
-                                    WHEN {temp_table}.{col} IS NULL OR TRIM({temp_table}.{col}) = '' THEN NULL
-                                    WHEN {temp_table}.{col} ~ '^\\d{{2}}/\\d{{2}}/\\d{{4}}$' THEN 
-                                        TO_DATE({temp_table}.{col}, 'DD/MM/YYYY')
-                                    ELSE NULL
-                                END
-                            """
-                        elif column_info and col in column_info:
-                            data_type, max_length = column_info[col]
-                            if data_type == 'character' and max_length is not None:
-                                col_expr = f"SUBSTRING(TRIM(COALESCE({temp_table}.{col}, '')) FROM 1 FOR {max_length})"
-                            elif data_type == 'character varying' and max_length is not None:
-                                col_expr = f"SUBSTRING(TRIM(COALESCE({temp_table}.{col}, '')) FROM 1 FOR {max_length})"
-                        
-                        insert_cols_final.append(f"{col_expr} AS {col}")
-                    
-                    insert_cols_str_final = ", ".join(insert_cols_final)
-                    cur.execute(f"INSERT INTO {table_name} ({cols_str}) SELECT {insert_cols_str_final} FROM {temp_table};")
-                    cur.execute(f"DROP TABLE {temp_table};")
-                    
-                    linhas_processadas += len(batch)
-                    batch = []
-                except Exception as e:
-                    try:
-                        cur.execute(f"DROP TABLE IF EXISTS {temp_table};")
-                    except:
-                        pass
-                    linhas_ignoradas += len(batch)
-                    batch = []
-                    if linha_num % 10000 == 0:
-                        print(f"      Linha {linha_num}: {linhas_processadas} processadas, {linhas_ignoradas} ignoradas")
-        
-        # Inserir lote final
-        if batch:
-            try:
-                temp_table = f"{table_name}_temp_batch"
-                temp_cols_def = ", ".join([f"{col} text" for col in columns])
-                cur.execute(f"CREATE TEMP TABLE {temp_table} ({temp_cols_def});")
-                
-                temp_placeholders = ", ".join(["%s"] * num_cols)
-                cur.executemany(f"INSERT INTO {temp_table} ({cols_str}) VALUES ({temp_placeholders})", batch)
-                
-                insert_cols_final = []
-                for col in columns:
-                    col_expr = f"{temp_table}.{col}"
-                    
-                    if date_cols_in_db and col in date_cols_in_db and date_cols_in_db[col] == 'date':
-                        col_expr = f"""
-                            CASE 
-                                WHEN {temp_table}.{col} IS NULL OR TRIM({temp_table}.{col}) = '' THEN NULL
-                                WHEN {temp_table}.{col} ~ '^\\d{{2}}/\\d{{2}}/\\d{{4}}$' THEN 
-                                    TO_DATE({temp_table}.{col}, 'DD/MM/YYYY')
-                                ELSE NULL
-                            END
-                        """
-                    elif column_info and col in column_info:
-                        data_type, max_length = column_info[col]
-                        if data_type == 'character' and max_length is not None:
-                            col_expr = f"SUBSTRING(TRIM(COALESCE({temp_table}.{col}, '')) FROM 1 FOR {max_length})"
-                        elif data_type == 'character varying' and max_length is not None:
-                            col_expr = f"SUBSTRING(TRIM(COALESCE({temp_table}.{col}, '')) FROM 1 FOR {max_length})"
-                    
-                    insert_cols_final.append(f"{col_expr} AS {col}")
-                
-                insert_cols_str_final = ", ".join(insert_cols_final)
-                cur.execute(f"INSERT INTO {table_name} ({cols_str}) SELECT {insert_cols_str_final} FROM {temp_table};")
-                cur.execute(f"DROP TABLE {temp_table};")
-                
-                linhas_processadas += len(batch)
-            except Exception as e:
-                try:
-                    cur.execute(f"DROP TABLE IF EXISTS {temp_table};")
-                except:
-                    pass
-                linhas_ignoradas += len(batch)
-    
-    print(f"    ✓ Linha por linha: {linhas_processadas} processadas, {linhas_ignoradas} ignoradas")
-    return linhas_processadas
-
 def importar_arquivo_individual(password, filepath, table_info, normalize_empty=False):
     """Importa um único arquivo CSV para o banco."""
     table_name = table_info["table"]
@@ -866,221 +529,41 @@ def importar_arquivo_individual(password, filepath, table_info, normalize_empty=
                 cur.execute(f"CREATE TEMP TABLE {temp_table} ({temp_cols_def});")
                 
                 # Importar para tabela temporária
-                try:
-                    with open(source_path, 'r', encoding='utf-8', errors='replace') as f:
-                        clean_f = NullByteStripper(f)
-                        sql = f"COPY {temp_table} ({cols_str}) FROM STDIN WITH (FORMAT csv, DELIMITER ';', NULL '', QUOTE '\"', ENCODING 'UTF8')"
-                        cur.copy_expert(sql, clean_f)
-                except psycopg2.errors.BadCopyFileFormat as e:
-                    # Se COPY falhar, usar importação linha por linha
-                    cur.execute(f"DROP TABLE {temp_table};")
-                    # Obter informações de colunas
-                    cur.execute("""
-                        SELECT column_name, data_type, character_maximum_length
-                        FROM information_schema.columns
-                        WHERE table_schema = 'public' 
-                        AND table_name = %s
-                        AND column_name = ANY(%s)
-                    """, (table_name, columns))
-                    column_info = {row[0]: (row[1], row[2]) for row in cur.fetchall()}
-                    importar_arquivo_individual_linha_por_linha(password, source_path, table_info, conn, cur, date_cols_in_db, column_info)
-                    conn.commit()
-                    cur.close()
-                    conn.close()
-                    elapsed = time.time() - start_time
-                    print(f"  -> Importado: {filepath.name} (tempo: {elapsed:.2f}s)")
-                    return True
+                with open(source_path, 'r', encoding='utf-8', errors='replace') as f:
+                    clean_f = NullByteStripper(f)
+                    sql = f"COPY {temp_table} ({cols_str}) FROM STDIN WITH (FORMAT csv, DELIMITER ';', NULL '', QUOTE '\"', ENCODING 'UTF8')"
+                    cur.copy_expert(sql, clean_f)
                 
-                # Obter informações sobre tipos de dados das colunas na tabela final
-                cur.execute("""
-                    SELECT column_name, data_type, character_maximum_length
-                    FROM information_schema.columns
-                    WHERE table_schema = 'public' 
-                    AND table_name = %s
-                    AND column_name = ANY(%s)
-                """, (table_name, columns))
-                
-                column_info = {row[0]: (row[1], row[2]) for row in cur.fetchall()}
-                
-                # Converter e inserir na tabela final com validação de tamanho
+                # Converter e inserir na tabela final
                 insert_cols = []
                 for col in columns:
-                    col_expr = f"{temp_table}.{col}"
-                    
-                    # Se for coluna de data, converter
                     if col in date_cols_in_db and date_cols_in_db[col] == 'date':
-                        col_expr = f"""
+                        insert_cols.append(f"""
                             CASE 
                                 WHEN {temp_table}.{col} IS NULL OR TRIM({temp_table}.{col}) = '' THEN NULL
                                 WHEN {temp_table}.{col} ~ '^\\d{{2}}/\\d{{2}}/\\d{{4}}$' THEN 
                                     TO_DATE({temp_table}.{col}, 'DD/MM/YYYY')
                                 ELSE NULL
-                            END
-                        """
-                    # Se for coluna char(n) ou varchar(n), truncar para o tamanho máximo
-                    elif col in column_info:
-                        data_type, max_length = column_info[col]
-                        if data_type == 'character' and max_length is not None:
-                            col_expr = f"""
-                                CASE 
-                                    WHEN {temp_table}.{col} IS NULL OR TRIM({temp_table}.{col}) = '' THEN NULL
-                                    ELSE SUBSTRING(TRIM({temp_table}.{col}) FROM 1 FOR {max_length})
-                                END
-                            """
-                        elif data_type == 'character varying' and max_length is not None:
-                            col_expr = f"""
-                                CASE 
-                                    WHEN {temp_table}.{col} IS NULL OR TRIM({temp_table}.{col}) = '' THEN NULL
-                                    ELSE SUBSTRING(TRIM({temp_table}.{col}) FROM 1 FOR {max_length})
-                                END
-                            """
-                    
-                    insert_cols.append(f"{col_expr} AS {col}")
+                            END AS {col}
+                        """)
+                    else:
+                        insert_cols.append(f"{temp_table}.{col}")
                 
                 insert_cols_str = ", ".join(insert_cols)
                 cur.execute(f"INSERT INTO {table_name} ({cols_str}) SELECT {insert_cols_str} FROM {temp_table};")
                 cur.execute(f"DROP TABLE {temp_table};")
             else:
                 # Importar diretamente (datas ainda são TEXT)
-                # Mas ainda precisamos validar tamanhos de colunas char(n)
-                # Usar tabela temporária para validação mesmo sem conversão de data
-                temp_table = f"{table_name}_temp_import"
-                temp_cols_def = ", ".join([f"{col} text" for col in columns])
-                cur.execute(f"CREATE TEMP TABLE {temp_table} ({temp_cols_def});")
-                
-                try:
-                    with open(source_path, 'r', encoding='utf-8', errors='replace') as f:
-                        clean_f = NullByteStripper(f)
-                        sql = f"COPY {temp_table} ({cols_str}) FROM STDIN WITH (FORMAT csv, DELIMITER ';', NULL '', QUOTE '\"', ENCODING 'UTF8')"
-                        cur.copy_expert(sql, clean_f)
-                except psycopg2.errors.BadCopyFileFormat as e:
-                    # Se COPY falhar, usar importação linha por linha
-                    cur.execute(f"DROP TABLE {temp_table};")
-                    # Obter informações de colunas
-                    cur.execute("""
-                        SELECT column_name, data_type, character_maximum_length
-                        FROM information_schema.columns
-                        WHERE table_schema = 'public' 
-                        AND table_name = %s
-                        AND column_name = ANY(%s)
-                    """, (table_name, columns))
-                    column_info = {row[0]: (row[1], row[2]) for row in cur.fetchall()}
-                    importar_arquivo_individual_linha_por_linha(password, source_path, table_info, conn, cur, None, column_info)
-                    conn.commit()
-                    cur.close()
-                    conn.close()
-                    elapsed = time.time() - start_time
-                    print(f"  -> Importado: {filepath.name} (tempo: {elapsed:.2f}s)")
-                    return True
-                
-                # Obter informações sobre tipos de dados das colunas
-                cur.execute("""
-                    SELECT column_name, data_type, character_maximum_length
-                    FROM information_schema.columns
-                    WHERE table_schema = 'public' 
-                    AND table_name = %s
-                    AND column_name = ANY(%s)
-                """, (table_name, columns))
-                
-                column_info = {row[0]: (row[1], row[2]) for row in cur.fetchall()}
-                
-                # Inserir com validação de tamanho
-                insert_cols = []
-                for col in columns:
-                    col_expr = f"{temp_table}.{col}"
-                    
-                    if col in column_info:
-                        data_type, max_length = column_info[col]
-                        if data_type == 'character' and max_length is not None:
-                            col_expr = f"""
-                                CASE 
-                                    WHEN {temp_table}.{col} IS NULL OR TRIM({temp_table}.{col}) = '' THEN NULL
-                                    ELSE LEFT(TRIM({temp_table}.{col}), {max_length})
-                                END
-                            """
-                        elif data_type == 'character varying' and max_length is not None:
-                            col_expr = f"""
-                                CASE 
-                                    WHEN {temp_table}.{col} IS NULL OR TRIM({temp_table}.{col}) = '' THEN NULL
-                                    ELSE LEFT(TRIM({temp_table}.{col}), {max_length})
-                                END
-                            """
-                    
-                    insert_cols.append(f"{col_expr} AS {col}")
-                
-                insert_cols_str = ", ".join(insert_cols)
-                cur.execute(f"INSERT INTO {table_name} ({cols_str}) SELECT {insert_cols_str} FROM {temp_table};")
-                cur.execute(f"DROP TABLE {temp_table};")
-        else:
-            # Sem colunas de data, mas ainda validar tamanhos
-            # Usar tabela temporária para validação
-            temp_table = f"{table_name}_temp_import"
-            temp_cols_def = ", ".join([f"{col} text" for col in columns])
-            cur.execute(f"CREATE TEMP TABLE {temp_table} ({temp_cols_def});")
-            
-            try:
                 with open(source_path, 'r', encoding='utf-8', errors='replace') as f:
                     clean_f = NullByteStripper(f)
-                    sql = f"COPY {temp_table} ({cols_str}) FROM STDIN WITH (FORMAT csv, DELIMITER ';', NULL '', QUOTE '\"', ENCODING 'UTF8')"
+                    sql = f"COPY {table_name} ({cols_str}) FROM STDIN WITH (FORMAT csv, DELIMITER ';', NULL '', QUOTE '\"', ENCODING 'UTF8')"
                     cur.copy_expert(sql, clean_f)
-            except psycopg2.errors.BadCopyFileFormat as e:
-                # Se COPY falhar, usar importação linha por linha
-                cur.execute(f"DROP TABLE {temp_table};")
-                # Obter informações de colunas
-                cur.execute("""
-                    SELECT column_name, data_type, character_maximum_length
-                    FROM information_schema.columns
-                    WHERE table_schema = 'public' 
-                    AND table_name = %s
-                    AND column_name = ANY(%s)
-                """, (table_name, columns))
-                column_info = {row[0]: (row[1], row[2]) for row in cur.fetchall()}
-                importar_arquivo_individual_linha_por_linha(password, source_path, table_info, conn, cur, None, column_info)
-                conn.commit()
-                cur.close()
-                conn.close()
-                elapsed = time.time() - start_time
-                print(f"  -> Importado: {filepath.name} (tempo: {elapsed:.2f}s)")
-                return True
-            
-            # Obter informações sobre tipos de dados das colunas
-            cur.execute("""
-                SELECT column_name, data_type, character_maximum_length
-                FROM information_schema.columns
-                WHERE table_schema = 'public' 
-                AND table_name = %s
-                AND column_name = ANY(%s)
-            """, (table_name, columns))
-            
-            column_info = {row[0]: (row[1], row[2]) for row in cur.fetchall()}
-            
-            # Inserir com validação de tamanho
-            insert_cols = []
-            for col in columns:
-                col_expr = f"{temp_table}.{col}"
-                
-                if col in column_info:
-                    data_type, max_length = column_info[col]
-                    if data_type == 'character' and max_length is not None:
-                        col_expr = f"""
-                            CASE 
-                                WHEN {temp_table}.{col} IS NULL OR TRIM({temp_table}.{col}) = '' THEN NULL
-                                ELSE SUBSTRING(TRIM({temp_table}.{col}) FROM 1 FOR {max_length})
-                            END
-                        """
-                    elif data_type == 'character varying' and max_length is not None:
-                        col_expr = f"""
-                            CASE 
-                                WHEN {temp_table}.{col} IS NULL OR TRIM({temp_table}.{col}) = '' THEN NULL
-                                ELSE SUBSTRING(TRIM({temp_table}.{col}) FROM 1 FOR {max_length})
-                            END
-                        """
-                
-                insert_cols.append(f"{col_expr} AS {col}")
-            
-            insert_cols_str = ", ".join(insert_cols)
-            cur.execute(f"INSERT INTO {table_name} ({cols_str}) SELECT {insert_cols_str} FROM {temp_table};")
-            cur.execute(f"DROP TABLE {temp_table};")
+        else:
+            # Sem colunas de data, importar diretamente
+            with open(source_path, 'r', encoding='utf-8', errors='replace') as f:
+                clean_f = NullByteStripper(f)
+                sql = f"COPY {table_name} ({cols_str}) FROM STDIN WITH (FORMAT csv, DELIMITER ';', NULL '', QUOTE '\"', ENCODING 'UTF8')"
+                cur.copy_expert(sql, clean_f)
             
         conn.commit()
         cur.close()
@@ -1282,107 +765,107 @@ def get_column_type(cur, table, column):
     return res[0] if res else None
 
 def converter_e_indexar(password):
-    """Cria índices e otimiza o banco de dados."""
-    print("\n[6/6] Criando Índices e Otimizando Banco de Dados...")
-    print("  As tabelas já foram criadas com tipos otimizados (char, varchar, date, numeric)")
-    print("  Criando índices para otimização de consultas...")
+    """Converte tipos de dados e cria índices (com verificação de estado)."""
+    print("\n[6/6] Convertendo Tipos e Criando Índices...")
+    print("  Convertendo tipos de dados e criando índices para otimização de consultas...")
     
     conn = get_db_connection(password)
     conn.set_isolation_level(ISOLATION_LEVEL_AUTOCOMMIT)
     cur = conn.cursor()
     
-    # Verificar se as tabelas estão com tipos otimizados
-    print("\n  --- Verificando Tipos das Tabelas ---")
-    tabelas_verificar = ["empresas", "estabelecimentos", "socios", "simples"]
-    tipos_esperados = {
-        "empresas": {"capital_social": "numeric", "razao_social": "character varying"},
-        "estabelecimentos": {"data_situacao": "date", "data_inicio": "date", "nome_fantasia": "character varying"},
-        "socios": {"data_entrada_sociedade": "date"},
-        "simples": {"data_opcao_simples": "date"}
-    }
+    # Lista de Conversões: (Tabela, Coluna, Tipo Alvo, Comando SQL)
+    # NOTA: As tabelas já são criadas otimizadas, mas esta função serve para converter
+    # tabelas antigas ou fazer ajustes finais
+    conversions = [
+        # Capital social (se ainda for text)
+        ("empresas", "capital_social", "numeric", 
+         "ALTER TABLE empresas ALTER COLUMN capital_social TYPE numeric USING (REPLACE(NULLIF(TRIM(capital_social::text), ''), ',', '.')::numeric);"),
+        
+        # Datas em estabelecimentos (se ainda forem text)
+        ("estabelecimentos", "data_situacao", "date",
+         "ALTER TABLE estabelecimentos ALTER COLUMN data_situacao TYPE date USING CASE WHEN data_situacao IS NULL OR TRIM(data_situacao) = '' THEN NULL WHEN data_situacao ~ '^\\d{2}/\\d{2}/\\d{4}$' THEN TO_DATE(data_situacao, 'DD/MM/YYYY') ELSE NULL END;"),
+        ("estabelecimentos", "data_inicio", "date",
+         "ALTER TABLE estabelecimentos ALTER COLUMN data_inicio TYPE date USING CASE WHEN data_inicio IS NULL OR TRIM(data_inicio) = '' THEN NULL WHEN data_inicio ~ '^\\d{2}/\\d{2}/\\d{4}$' THEN TO_DATE(data_inicio, 'DD/MM/YYYY') ELSE NULL END;"),
+        ("estabelecimentos", "data_situacao_especial", "date",
+         "ALTER TABLE estabelecimentos ALTER COLUMN data_situacao_especial TYPE date USING CASE WHEN data_situacao_especial IS NULL OR TRIM(data_situacao_especial) = '' THEN NULL WHEN data_situacao_especial ~ '^\\d{2}/\\d{2}/\\d{4}$' THEN TO_DATE(data_situacao_especial, 'DD/MM/YYYY') ELSE NULL END;"),
+        
+        # Datas em socios
+        ("socios", "data_entrada_sociedade", "date",
+         "ALTER TABLE socios ALTER COLUMN data_entrada_sociedade TYPE date USING CASE WHEN data_entrada_sociedade IS NULL OR TRIM(data_entrada_sociedade) = '' THEN NULL WHEN data_entrada_sociedade ~ '^\\d{2}/\\d{2}/\\d{4}$' THEN TO_DATE(data_entrada_sociedade, 'DD/MM/YYYY') ELSE NULL END;"),
+        
+        # Datas em simples
+        ("simples", "data_opcao_simples", "date",
+         "ALTER TABLE simples ALTER COLUMN data_opcao_simples TYPE date USING CASE WHEN data_opcao_simples IS NULL OR TRIM(data_opcao_simples) = '' THEN NULL WHEN data_opcao_simples ~ '^\\d{2}/\\d{2}/\\d{4}$' THEN TO_DATE(data_opcao_simples, 'DD/MM/YYYY') ELSE NULL END;"),
+        ("simples", "data_exclusao_simples", "date",
+         "ALTER TABLE simples ALTER COLUMN data_exclusao_simples TYPE date USING CASE WHEN data_exclusao_simples IS NULL OR TRIM(data_exclusao_simples) = '' THEN NULL WHEN data_exclusao_simples ~ '^\\d{2}/\\d{2}/\\d{4}$' THEN TO_DATE(data_exclusao_simples, 'DD/MM/YYYY') ELSE NULL END;"),
+        ("simples", "data_opcao_mei", "date",
+         "ALTER TABLE simples ALTER COLUMN data_opcao_mei TYPE date USING CASE WHEN data_opcao_mei IS NULL OR TRIM(data_opcao_mei) = '' THEN NULL WHEN data_opcao_mei ~ '^\\d{2}/\\d{2}/\\d{4}$' THEN TO_DATE(data_opcao_mei, 'DD/MM/YYYY') ELSE NULL END;"),
+        ("simples", "data_exclusao_mei", "date",
+         "ALTER TABLE simples ALTER COLUMN data_exclusao_mei TYPE date USING CASE WHEN data_exclusao_mei IS NULL OR TRIM(data_exclusao_mei) = '' THEN NULL WHEN data_exclusao_mei ~ '^\\d{2}/\\d{2}/\\d{4}$' THEN TO_DATE(data_exclusao_mei, 'DD/MM/YYYY') ELSE NULL END;"),
+    ]
     
-    todas_otimizadas = True
-    for tabela in tabelas_verificar:
-        if tabela in tipos_esperados:
-            for coluna, tipo_esperado in tipos_esperados[tabela].items():
+    print("  --- Verificando e Convertendo Tipos ---")
+    for table, col, target_type, cmd in conversions:
+        try:
+            current_type = get_column_type(cur, table, col)
+            if current_type and current_type != target_type:
+                print(f"    -> Convertendo {table}.{col} (de {current_type} para {target_type})...", end=" ", flush=True)
                 try:
-                    tipo_atual = get_column_type(cur, tabela, coluna)
-                    if tipo_atual:
-                        if tipo_atual != tipo_esperado and tipo_atual != 'date' and 'varying' not in tipo_atual:
-                            print(f"    ⚠ {tabela}.{coluna}: {tipo_atual} (esperado: {tipo_esperado})")
-                            todas_otimizadas = False
-                        else:
-                            print(f"    ✓ {tabela}.{coluna}: {tipo_atual}")
-                except:
-                    pass
-    
-    if todas_otimizadas:
-        print("    ✓ Todas as tabelas estão com tipos otimizados!")
-    else:
-        print("    ⚠ Algumas tabelas podem precisar de conversão. As tabelas devem ser recriadas.")
+                    start = time.time()
+                    cur.execute(cmd)
+                    elapsed = time.time() - start
+                    print(f"Concluído em {elapsed:.2f}s")
+                except Exception as e:
+                    print(f"ERRO: {e}")
+            else:
+                if current_type:
+                    print(f"    -> {table}.{col} já é do tipo {target_type}.")
+        except Exception as e:
+            # Coluna pode não existir ou tabela pode não existir ainda
+            pass
 
-    # Índices OTIMIZADOS - apenas os essenciais para as consultas da API
-    # Removidos índices redundantes e desnecessários para economizar espaço
-    print("\n  --- Criando Índices Essenciais (otimizados para API) ---")
+    # Índices (OTIMIZADOS para performance máxima)
+    print("\n  --- Criando Índices Otimizados (se não existirem) ---")
     index_commands = [
-        # Extensão para busca fuzzy (usada em nome_fantasia e razao_social)
+        # Extensões
         ("Extensão pg_trgm", "CREATE EXTENSION IF NOT EXISTS pg_trgm;"),
         
-        # ========================================================================
-        # ESTABELECIMENTOS - Índices críticos para buscas da API
-        # ========================================================================
-        # CNPJ (busca principal) - UNIQUE é essencial
-        ("Índice UNIQUE CNPJ", "CREATE UNIQUE INDEX IF NOT EXISTS idx_estab_cnpj_unique ON estabelecimentos (cnpj);"),
+        # Índices principais estabelecimentos (mais usados)
+        ("Índice UNIQUE CNPJ estabelecimentos", "CREATE UNIQUE INDEX IF NOT EXISTS idx_estab_cnpj_unique ON estabelecimentos (cnpj);"),
+        ("Índice CNPJ básico estabelecimentos", "CREATE INDEX IF NOT EXISTS idx_estab_cnpj_basico ON estabelecimentos (cnpj_basico);"),
         
-        # CNPJ básico (para JOINs com empresas, simples, socios) - essencial
-        ("Índice CNPJ básico", "CREATE INDEX IF NOT EXISTS idx_estab_cnpj_basico ON estabelecimentos (cnpj_basico);"),
+        # Índices compostos para buscas comuns (melhoram muito a performance)
+        ("Índice composto UF + Município", "CREATE INDEX IF NOT EXISTS idx_estab_uf_municipio ON estabelecimentos (uf, municipio);"),
+        ("Índice composto UF + CNAE", "CREATE INDEX IF NOT EXISTS idx_estab_uf_cnae ON estabelecimentos (uf, cnae_fiscal);"),
+        ("Índice composto Situação + UF", "CREATE INDEX IF NOT EXISTS idx_estab_situacao_uf ON estabelecimentos (situacao_cadastral, uf);"),
         
-        # Filtros mais usados na API (criar índices simples, compostos só se realmente necessário)
-        ("Índice CNAE fiscal", "CREATE INDEX IF NOT EXISTS idx_estab_cnae ON estabelecimentos (cnae_fiscal);"),
-        ("Índice UF", "CREATE INDEX IF NOT EXISTS idx_estab_uf ON estabelecimentos (uf);"),
-        ("Índice município", "CREATE INDEX IF NOT EXISTS idx_estab_municipio ON estabelecimentos (municipio);"),
+        # Índices simples
+        ("Índice UF estabelecimentos", "CREATE INDEX IF NOT EXISTS idx_estab_uf ON estabelecimentos (uf);"),
+        ("Índice município estabelecimentos", "CREATE INDEX IF NOT EXISTS idx_estab_municipio ON estabelecimentos (municipio);"),
+        ("Índice CNAE fiscal estabelecimentos", "CREATE INDEX IF NOT EXISTS idx_estab_cnae_fiscal ON estabelecimentos (cnae_fiscal);"),
         ("Índice situação cadastral", "CREATE INDEX IF NOT EXISTS idx_estab_situacao ON estabelecimentos (situacao_cadastral);"),
         ("Índice matriz/filial", "CREATE INDEX IF NOT EXISTS idx_estab_matriz_filial ON estabelecimentos (matriz_filial);"),
         
-        # Índice composto UF + Município (muito usado juntos na API)
-        ("Índice composto UF+Município", "CREATE INDEX IF NOT EXISTS idx_estab_uf_municipio ON estabelecimentos (uf, municipio);"),
-        
-        # Busca fuzzy em nome_fantasia (usado na API)
+        # Índices de texto (GIN para busca rápida)
         ("Índice nome fantasia (trgm)", "CREATE INDEX IF NOT EXISTS idx_estab_fantasia_trgm ON estabelecimentos USING GIN (nome_fantasia gin_trgm_ops);"),
         
-        # ========================================================================
-        # EMPRESAS - Índices para filtros da API
-        # ========================================================================
-        # CNPJ básico já é PRIMARY KEY, não precisa índice adicional
-        # Natureza jurídica (filtro da API)
-        ("Índice natureza jurídica", "CREATE INDEX IF NOT EXISTS idx_empresas_natureza ON empresas (natureza_juridica);"),
-        # Porte (filtro da API)
-        ("Índice porte", "CREATE INDEX IF NOT EXISTS idx_empresas_porte ON empresas (porte);"),
-        # Capital social (filtro de range na API - precisa índice para >= e <=)
-        ("Índice capital social", "CREATE INDEX IF NOT EXISTS idx_empresas_capital ON empresas (capital_social);"),
-        # Razão social (busca fuzzy na API)
-        ("Índice razão social (trgm)", "CREATE INDEX IF NOT EXISTS idx_empresas_razao_trgm ON empresas USING GIN (razao_social gin_trgm_ops);"),
+        # Índices empresas
+        ("Índice razão social empresas (trgm)", "CREATE INDEX IF NOT EXISTS idx_empresas_razao_trgm ON empresas USING GIN (razao_social gin_trgm_ops);"),
+        ("Índice natureza jurídica empresas", "CREATE INDEX IF NOT EXISTS idx_empresas_natureza ON empresas (natureza_juridica);"),
+        ("Índice porte empresas", "CREATE INDEX IF NOT EXISTS idx_empresas_porte ON empresas (porte);"),
+        ("Índice capital social empresas", "CREATE INDEX IF NOT EXISTS idx_empresas_capital ON empresas (capital_social);"),
         
-        # ========================================================================
-        # SÓCIOS - Índices para JOINs
-        # ========================================================================
-        # CNPJ básico (para JOIN com estabelecimentos) - essencial
+        # Índices compostos empresas
+        ("Índice composto Natureza + Porte", "CREATE INDEX IF NOT EXISTS idx_empresas_natureza_porte ON empresas (natureza_juridica, porte);"),
+        
+        # Índices sócios
+        ("Índice nome sócio (trgm)", "CREATE INDEX IF NOT EXISTS idx_socios_nome_trgm ON socios USING GIN (nome_socio gin_trgm_ops);"),
+        ("Índice CNPJ/CPF sócio", "CREATE INDEX IF NOT EXISTS idx_socios_cnpj_cpf ON socios (cnpj_cpf_socio);"),
         ("Índice CNPJ básico sócios", "CREATE INDEX IF NOT EXISTS idx_socios_cnpj_basico ON socios (cnpj_basico);"),
         
-        # ========================================================================
-        # SIMPLES - Índices para filtros da API
-        # ========================================================================
-        # CNPJ básico já é PRIMARY KEY
-        # Opção simples (filtro da API)
+        # Índices simples
         ("Índice opção simples", "CREATE INDEX IF NOT EXISTS idx_simples_opcao ON simples (opcao_simples);"),
-        # Opção MEI (filtro da API)
         ("Índice opção MEI", "CREATE INDEX IF NOT EXISTS idx_simples_mei ON simples (opcao_mei);"),
-        
-        # ========================================================================
-        # TABELAS DE DOMÍNIO - Índices para JOINs
-        # ========================================================================
-        # Todas já têm PRIMARY KEY, mas índices podem ajudar em JOINs frequentes
-        # (Não criando índices adicionais aqui para economizar espaço - PRIMARY KEY já é suficiente)
     ]
     
     for desc, cmd in index_commands:
@@ -1398,48 +881,11 @@ def converter_e_indexar(password):
     # Otimizações finais
     print("\n  --- Otimizações Finais ---")
     
-    # Habilitar compressão nas tabelas grandes (reduz significativamente o tamanho)
-    # A compressão TOAST é automática no PostgreSQL, mas podemos configurar storage para colunas grandes
-    print("    -> Configurando compressão nas colunas grandes...", end=" ", flush=True)
-    try:
-        start = time.time()
-        tabelas = ["empresas", "estabelecimentos", "socios", "simples", "cnaes", "motivos", "municipios", "naturezas", "paises", "qualificacoes"]
-        
-        # Configurar compressão para colunas de texto grandes (TOAST automático)
-        # O PostgreSQL já usa compressão TOAST automaticamente para colunas grandes
-        # Podemos apenas garantir que as colunas text/varchar grandes usem EXTENDED storage (padrão)
-        compression_configs = {
-            "estabelecimentos": ["nome_fantasia", "logradouro", "cnae_fiscal_secundaria"],
-            "empresas": ["razao_social"],
-            "socios": ["nome_socio", "nome_representante"],
-            "cnaes": ["descricao"],
-            "motivos": ["descricao"],
-            "municipios": ["descricao"],
-            "naturezas": ["descricao"],
-            "paises": ["descricao"],
-            "qualificacoes": ["descricao"]
-        }
-        
-        for tabela in tabelas:
-            if tabela in compression_configs:
-                for coluna in compression_configs[tabela]:
-                    try:
-                        # EXTENDED storage permite compressão TOAST automática
-                        cur.execute(f"ALTER TABLE {tabela} ALTER COLUMN {coluna} SET STORAGE EXTENDED;")
-                    except Exception as col_err:
-                        # Coluna pode não existir ou já estar configurada
-                        pass
-        
-        elapsed = time.time() - start
-        print(f"Concluído em {elapsed:.2f}s")
-    except Exception as e:
-        print(f"ERRO: {e}")
-        print("    (Compressão TOAST é automática no PostgreSQL, continuando...)")
-    
     # ANALYZE para atualizar estatísticas
     print("    -> Executando ANALYZE nas tabelas...", end=" ", flush=True)
     try:
         start = time.time()
+        tabelas = ["empresas", "estabelecimentos", "socios", "simples", "cnaes", "motivos", "municipios", "naturezas", "paises", "qualificacoes"]
         for tabela in tabelas:
             cur.execute(f"ANALYZE {tabela};")
         elapsed = time.time() - start
@@ -1447,91 +893,12 @@ def converter_e_indexar(password):
     except Exception as e:
         print(f"ERRO: {e}")
     
-    # VACUUM FULL para compactar e reduzir tamanho físico (pode demorar, mas reduz significativamente)
-    print("    -> Executando VACUUM FULL nas tabelas (pode demorar, mas reduz muito o tamanho)...")
+    # VACUUM (sem FULL para não bloquear) para limpar espaço morto
+    print("    -> Executando VACUUM nas tabelas...", end=" ", flush=True)
     try:
         start = time.time()
         for tabela in tabelas:
-            print(f"      -> VACUUM FULL {tabela}...", end=" ", flush=True)
-            cur.execute(f"VACUUM FULL {tabela};")
-            print("OK")
-        elapsed = time.time() - start
-        print(f"    VACUUM FULL concluído em {elapsed:.2f}s")
-    except Exception as e:
-        print(f"ERRO: {e}")
-    
-    # VACUUM FULL no banco inteiro para otimização máxima
-    print("    -> Executando VACUUM FULL no banco inteiro (otimização máxima)...", end=" ", flush=True)
-    try:
-        start = time.time()
-        cur.execute("VACUUM FULL;")
-        elapsed = time.time() - start
-        print(f"Concluído em {elapsed:.2f}s")
-    except Exception as e:
-        print(f"ERRO: {e}")
-    
-    # Configurações adicionais de performance
-    print("\n  --- Configurações de Performance ---")
-    
-    # Configurar fillfactor para reduzir fragmentação (ajuda em tabelas com muitas atualizações)
-    # Para tabelas read-only, fillfactor 100 é ideal (sem espaço extra)
-    print("    -> Configurando fillfactor para tabelas (otimização de espaço)...", end=" ", flush=True)
-    try:
-        start = time.time()
-        tabelas_principais = ["empresas", "estabelecimentos", "socios", "simples"]
-        for tabela in tabelas_principais:
-            try:
-                # fillfactor 100 = sem espaço extra, ideal para dados read-only
-                cur.execute(f"ALTER TABLE {tabela} SET (fillfactor = 100);")
-            except Exception as e:
-                pass
-        elapsed = time.time() - start
-        print(f"Concluído em {elapsed:.2f}s")
-    except Exception as e:
-        print(f"ERRO: {e}")
-    
-    # Remover índices desnecessários que podem ter sido criados anteriormente
-    print("    -> Removendo índices redundantes/desnecessários...", end=" ", flush=True)
-    try:
-        start = time.time()
-        indices_para_remover = [
-            "idx_estab_uf_cnae",  # Redundante - temos índices separados
-            "idx_estab_situacao_uf",  # Redundante - temos índices separados
-            "idx_empresas_natureza_porte",  # Redundante - temos índices separados
-            "idx_socios_nome_trgm",  # Não usado na API
-            "idx_socios_cnpj_cpf",  # Não usado na API
-        ]
-        for idx in indices_para_remover:
-            try:
-                # Tentar remover de cada tabela possível
-                for tabela in ["estabelecimentos", "empresas", "socios", "simples"]:
-                    try:
-                        cur.execute(f"DROP INDEX IF EXISTS {idx};")
-                    except:
-                        pass
-            except:
-                pass
-        elapsed = time.time() - start
-        print(f"Concluído em {elapsed:.2f}s")
-    except Exception as e:
-        print(f"ERRO: {e}")
-    
-    # Configurar autovacuum para manter o banco otimizado
-    print("    -> Configurando autovacuum para tabelas grandes...", end=" ", flush=True)
-    try:
-        start = time.time()
-        # Para tabelas grandes, ajustar autovacuum para ser mais agressivo
-        for tabela in ["estabelecimentos", "socios"]:
-            try:
-                # Reduzir threshold de autovacuum para manter tabelas sempre otimizadas
-                cur.execute(f"""
-                    ALTER TABLE {tabela} SET (
-                        autovacuum_vacuum_scale_factor = 0.05,
-                        autovacuum_analyze_scale_factor = 0.02
-                    );
-                """)
-            except Exception as e:
-                pass
+            cur.execute(f"VACUUM {tabela};")
         elapsed = time.time() - start
         print(f"Concluído em {elapsed:.2f}s")
     except Exception as e:
@@ -1544,36 +911,21 @@ def converter_e_indexar(password):
         tamanho = cur.fetchone()[0]
         print(f"    Tamanho total do banco: {tamanho}")
         
-        # Tamanho dos índices
-        cur.execute("""
-            SELECT 
-                pg_size_pretty(SUM(pg_relation_size(indexrelid))) as total_index_size
-            FROM pg_stat_user_indexes
-            WHERE schemaname = 'public';
-        """)
-        idx_size = cur.fetchone()[0]
-        print(f"    Tamanho total dos índices: {idx_size}")
-        
         cur.execute("""
             SELECT 
                 tablename,
-                pg_size_pretty(pg_total_relation_size('public.'||tablename)) as size,
-                pg_size_pretty(pg_relation_size('public.'||tablename)) as table_size,
-                pg_size_pretty(pg_total_relation_size('public.'||tablename) - pg_relation_size('public.'||tablename)) as index_size
+                pg_size_pretty(pg_total_relation_size('public.'||tablename)) as size
             FROM pg_tables
             WHERE schemaname = 'public'
             ORDER BY pg_total_relation_size('public.'||tablename) DESC
             LIMIT 5;
         """)
-        print("    Top 5 tabelas por tamanho (tabela + índices):")
+        print("    Top 5 tabelas por tamanho:")
         for row in cur.fetchall():
-            print(f"      {row[0]}: Total={row[1]}, Tabela={row[2]}, Índices={row[3]}")
+            print(f"      {row[0]}: {row[1]}")
     except Exception as e:
         print(f"    Erro ao verificar tamanho: {e}")
             
     cur.close()
     conn.close()
-    print("\n✓ Otimização e indexação concluídas com sucesso!")
-    print("  - Índices essenciais criados (apenas os necessários para a API)")
-    print("  - Tabelas otimizadas para reduzir tamanho")
-    print("  - Configurações de performance aplicadas")
+    print("\nConversão e indexação concluídas.")
